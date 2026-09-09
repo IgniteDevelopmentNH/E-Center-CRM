@@ -23,6 +23,16 @@ export interface Env {
   // Secrets -- set with `wrangler secret put NAME`, never written to this file.
   JWT_SECRET?: string;
   ENCRYPTION_KEY?: string;
+
+  // Temporary secrets for POST /api/bootstrap (see routes/bootstrap.ts). Only
+  // needed once, for the very first owner/editor accounts on a fresh
+  // database; delete them (`wrangler secret delete NAME`) once used.
+  BOOTSTRAP_OWNER_EMAIL?: string;
+  BOOTSTRAP_OWNER_NAME?: string;
+  BOOTSTRAP_OWNER_PASSWORD?: string;
+  BOOTSTRAP_EDITOR_EMAIL?: string;
+  BOOTSTRAP_EDITOR_NAME?: string;
+  BOOTSTRAP_EDITOR_PASSWORD?: string;
 }
 
 export interface Config {

@@ -44,6 +44,14 @@ JWT_TTL_REMEMBER_SECONDS = "2592000"
 #   (Microsoft app registration client id/secret are entered per-tenant in
 #    Settings -> Outlook calendar in the app itself, encrypted into D1 — not a
 #    Worker secret.)
+#
+# One-time-only bootstrap secrets (see worker/src/routes/bootstrap.ts) for
+# creating the very first account(s) on a fresh, empty database. Delete them
+# with `wrangler secret delete NAME` once POST /api/bootstrap has been called
+# once — the route self-disarms after that regardless, but there is no reason
+# to leave a password sitting in Worker secrets longer than needed.
+#   BOOTSTRAP_OWNER_EMAIL / BOOTSTRAP_OWNER_NAME / BOOTSTRAP_OWNER_PASSWORD
+#   BOOTSTRAP_EDITOR_EMAIL / BOOTSTRAP_EDITOR_NAME / BOOTSTRAP_EDITOR_PASSWORD  (optional)
 
 [observability]
 enabled = true

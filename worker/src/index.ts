@@ -6,6 +6,7 @@ import { getSessionUser } from './lib/session.ts';
 import { Router } from './router.ts';
 import type { Ctx } from './router.ts';
 import { register as registerAuth } from './routes/auth.ts';
+import { register as registerBootstrap } from './routes/bootstrap.ts';
 import { register as registerCalendar } from './routes/calendar.ts';
 import { register as registerContacts } from './routes/contacts.ts';
 import { register as registerDashboard } from './routes/dashboard.ts';
@@ -29,7 +30,8 @@ router
   .use(registerSearch)
   .use(registerDocuments)
   .use(registerSettings)
-  .use(registerCalendar);
+  .use(registerCalendar)
+  .use(registerBootstrap);
 
 function corsHeaders(origin: string | null): Record<string, string> {
   return {
