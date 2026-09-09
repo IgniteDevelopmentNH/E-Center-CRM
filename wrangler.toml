@@ -22,7 +22,7 @@ not_found_handling = "single-page-application"
 [[d1_databases]]
 binding = "DB"
 database_name = "ecenter-crm"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_id = "e3086f4f-31f6-460a-9ed4-a81a1e1946e6"
 
 # Create with: wrangler r2 bucket create ecenter-crm-documents
 [[r2_buckets]]
