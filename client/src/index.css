@@ -1,0 +1,103 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-slate-50 text-slate-800 font-sans antialiased;
+  }
+
+  /* Visible focus for keyboard users on every interactive element. */
+  :focus-visible {
+    @apply outline-none ring-2 ring-teal ring-offset-2 ring-offset-white;
+  }
+
+  /* Native pickers on mobile, consistent height on desktop. */
+  input[type='date'],
+  input[type='datetime-local'] {
+    @apply min-h-[44px];
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-xl border border-slate-200 bg-white shadow-card;
+  }
+
+  .card-interactive {
+    @apply card cursor-pointer transition hover:border-navy-200 hover:shadow-raised focus-visible:border-navy-200;
+  }
+
+  .label {
+    @apply mb-1.5 block text-sm font-semibold text-navy-800;
+  }
+
+  .input {
+    @apply block w-full min-h-[44px] rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm
+      text-slate-800 placeholder:text-slate-400 focus:border-teal focus:outline-none
+      focus:ring-2 focus:ring-teal/30 disabled:bg-slate-100 disabled:text-slate-500;
+  }
+
+  .input-error {
+    @apply border-urgent focus:border-urgent focus:ring-urgent/30;
+  }
+
+  /* Minimum 44x44 touch targets throughout. */
+  .btn {
+    @apply inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg px-4 py-2
+      text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  .btn-primary {
+    @apply btn bg-navy text-white hover:bg-navy-600 active:bg-navy-800;
+  }
+
+  .btn-secondary {
+    @apply btn bg-teal text-white hover:bg-teal-700 active:bg-teal-800;
+  }
+
+  .btn-ghost {
+    @apply btn border border-slate-300 bg-white text-navy-800 hover:border-navy-200 hover:bg-navy-50;
+  }
+
+  .btn-danger {
+    @apply btn bg-urgent text-white hover:brightness-95;
+  }
+
+  .btn-quiet {
+    @apply btn min-h-0 px-2 py-1 text-sm text-slate-500 hover:bg-slate-100 hover:text-navy-800;
+  }
+
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold;
+  }
+
+  .tab-link {
+    @apply flex min-h-[44px] items-center gap-2 whitespace-nowrap border-b-2 border-transparent px-3
+      text-sm font-semibold text-navy-100 transition hover:border-navy-200 hover:text-white;
+  }
+
+  .tab-link-active {
+    @apply border-gold text-white;
+  }
+
+  /* Wide content scrolls inside its own container, never the page body. */
+  .scroll-x {
+    @apply -mx-1 overflow-x-auto px-1;
+  }
+}
+
+/* Timeline rail for the notes view. */
+.timeline::before {
+  content: '';
+  position: absolute;
+  left: 7px;
+  top: 14px;
+  bottom: 0;
+  width: 2px;
+  background: theme('colors.slate.200');
+}
