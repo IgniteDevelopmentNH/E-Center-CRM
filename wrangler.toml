@@ -4,7 +4,18 @@
 # the repository root — which is what Cloudflare Workers Builds does by default
 # — finds it with no dashboard "Root directory" change needed. Paths below are
 # relative to this file.
-name = "ecenter-crm"
+#
+# `name` MUST stay "e-center-crm": that identity was fixed the moment the
+# GitHub repo (E-Center-CRM) was first connected in the Cloudflare dashboard,
+# before this file existed, and Workers Builds deploys to that fixed identity
+# on every push regardless of what `name` says here -- it does not rename the
+# Worker to follow this file. A mismatch here just means a *second*, separate
+# Worker gets created by `wrangler deploy` (with its own D1/R2 bindings and
+# secrets to keep in sync by hand) rather than updating the real one at
+# https://e-center-crm.joshuab8236.workers.dev. Keeping this file's name
+# aligned is what makes `wrangler deploy` and a git push land on the same
+# Worker.
+name = "e-center-crm"
 main = "./worker/src/index.ts"
 compatibility_date = "2024-09-23"
 compatibility_flags = ["nodejs_compat"]
