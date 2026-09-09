@@ -1,0 +1,19 @@
+{
+  "name": "@ecenter/worker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch --env-file-if-exists=../.env dev/dev-server.mjs",
+    "migrate": "node --env-file-if-exists=../.env scripts/migrate.ts",
+    "seed": "node --env-file-if-exists=../.env scripts/seed.ts",
+    "reset": "node --env-file-if-exists=../.env scripts/reset.ts",
+    "test": "node --env-file-if-exists=../.env --test test/api.test.ts",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.node.json"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250906.0",
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2"
+  }
+}

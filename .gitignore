@@ -5,8 +5,11 @@ build/
 .env.local
 .env.*.local
 
-# Local SQLite database and uploaded documents
-server/data/
+# Local dev D1 shim (SQLite file) and uploaded documents (fake R2)
+worker/data/
+
+# Wrangler's local state (wrangler dev sessions, etc.)
+.wrangler/
 
 *.log
 npm-debug.log*

@@ -1,0 +1,52 @@
+# UNH ECenter CRM — Cloudflare Worker configuration.
+#
+# Lives at the repo root (not inside worker/) so `npx wrangler deploy` run from
+# the repository root — which is what Cloudflare Workers Builds does by default
+# — finds it with no dashboard "Root directory" change needed. Paths below are
+# relative to this file.
+name = "ecenter-crm"
+main = "./worker/src/index.ts"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+# Static client build (client/dist) served directly by the platform; the
+# Worker only runs for requests that don't match a built file (see [[assets]]
+# not_found_handling below, and the /api/* fetch handler in worker/src/index.ts).
+[assets]
+directory = "./client/dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+
+# Create with: wrangler d1 create ecenter-crm
+# Then paste the printed database_id below.
+[[d1_databases]]
+binding = "DB"
+database_name = "ecenter-crm"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+
+# Create with: wrangler r2 bucket create ecenter-crm-documents
+[[r2_buckets]]
+binding = "DOCS"
+bucket_name = "ecenter-crm-documents"
+
+[vars]
+DEFAULT_CUSTOMER_SLUG = "unh-ecenter"
+DEFAULT_CUSTOMER_NAME = "UNH Entrepreneurship Center"
+DOWNLOAD_URL_TTL_SECONDS = "900"
+UPLOAD_MAX_BYTES = "52428800"
+JWT_TTL_SECONDS = "43200"
+JWT_TTL_REMEMBER_SECONDS = "2592000"
+
+# Secrets (never in this file — set with `wrangler secret put NAME`):
+#   JWT_SECRET            openssl rand -hex 32
+#   ENCRYPTION_KEY         openssl rand -hex 32   (AES-256-GCM for OAuth secrets/tokens)
+#   MICROSOFT_REDIRECT_URI  https://<your-worker-domain>/api/calendar/microsoft/callback
+#   (Microsoft app registration client id/secret are entered per-tenant in
+#    Settings -> Outlook calendar in the app itself, encrypted into D1 — not a
+#    Worker secret.)
+
+[observability]
+enabled = true
+
+[observability.logs]
+enabled = true
