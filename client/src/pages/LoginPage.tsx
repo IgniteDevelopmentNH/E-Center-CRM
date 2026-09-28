@@ -35,10 +35,7 @@ export function LoginPage() {
               alt="University of New Hampshire"
               className="mx-auto h-10 w-auto sm:h-12"
             />
-            <h1 className="mt-6 text-2xl font-bold text-white">ECenter CRM</h1>
-            <p className="mt-1 text-sm text-navy-100">
-              One place to nurture your entrepreneurial network
-            </p>
+            <h1 className="mt-6 text-3xl font-bold text-white">ECenter CRM</h1>
           </div>
 
           <form onSubmit={onSubmit} className="card space-y-4 p-6" noValidate>
