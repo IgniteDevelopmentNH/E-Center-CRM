@@ -98,6 +98,18 @@ export const api = {
   delete: <T>(path: string) => request<T>('DELETE', path),
 };
 
+/** Fetches a short-lived signed URL for a stored document and opens it in a new tab. */
+export async function openDocument(documentId: string): Promise<void> {
+  const response = await api.get<{ url: string }>(`/documents/${documentId}/download`);
+  const link = document.createElement('a');
+  link.href = response.url;
+  link.rel = 'noopener';
+  link.target = '_blank';
+  document.body.append(link);
+  link.click();
+  link.remove();
+}
+
 /** Triggers a browser download for a CSV export, passing the bearer token. */
 export async function downloadCsv(path: string, filename: string): Promise<void> {
   const token = getToken();

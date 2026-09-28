@@ -12,10 +12,16 @@ import type { Ctx, Router } from '../router.ts';
 
 const SELECT_NOTE = `
   SELECT n.*,
-         (c.first_name || ' ' || c.last_name) AS contact_name,
-         author.name AS created_by_name
+         CASE WHEN c.id IS NULL THEN NULL ELSE (c.first_name || ' ' || c.last_name) END AS contact_name,
+         author.name AS created_by_name,
+         (SELECT json_group_array(json_object('id', ct.id, 'name', ct.first_name || ' ' || ct.last_name))
+            FROM note_contacts nc
+            JOIN contacts ct ON ct.id = nc.contact_id AND ct.deleted_at IS NULL
+           WHERE nc.note_id = n.id) AS contacts_json,
+         (SELECT json_group_array(json_object('id', d.id, 'name', d.file_name, 'size', d.file_size))
+            FROM documents d WHERE d.note_id = n.id AND d.deleted_at IS NULL) AS attachments_json
     FROM notes n
-    JOIN contacts c ON c.id = n.contact_id
+    LEFT JOIN contacts c ON c.id = n.contact_id
     LEFT JOIN users author ON author.id = n.created_by`;
 
 function buildFilters(customerId: string, query: URLSearchParams) {
@@ -24,8 +30,11 @@ function buildFilters(customerId: string, query: URLSearchParams) {
 
   const contactId = query.get('contactId');
   if (contactId) {
-    where.push('n.contact_id = ?');
-    params.push(contactId);
+    // Match the note's primary contact OR any contact it is filed under.
+    where.push(
+      `(n.contact_id = ? OR EXISTS (SELECT 1 FROM note_contacts nc WHERE nc.note_id = n.id AND nc.contact_id = ?))`,
+    );
+    params.push(contactId, contactId);
   }
 
   const q = (query.get('q') ?? '').trim().toLowerCase();
@@ -33,7 +42,9 @@ function buildFilters(customerId: string, query: URLSearchParams) {
     const like = `%${q}%`;
     where.push(
       `(LOWER(n.content) LIKE ? OR LOWER(n.tags) LIKE ?
-        OR LOWER(c.first_name) LIKE ? OR LOWER(c.last_name) LIKE ?)`,
+        OR EXISTS (SELECT 1 FROM note_contacts nc JOIN contacts ncc ON ncc.id = nc.contact_id
+                    WHERE nc.note_id = n.id
+                      AND (LOWER(ncc.first_name) LIKE ? OR LOWER(ncc.last_name) LIKE ?)))`,
     );
     params.push(like, like, like, like);
   }
@@ -79,7 +90,7 @@ export function register(router: Router): void {
     const page = positiveInt(ctx.query.get('page'), 1, 10000);
 
     const totalRow = await ctx.db.get<{ total: unknown }>(
-      `SELECT COUNT(*) AS total FROM notes n JOIN contacts c ON c.id = n.contact_id WHERE ${clause}`,
+      `SELECT COUNT(*) AS total FROM notes n LEFT JOIN contacts c ON c.id = n.contact_id WHERE ${clause}`,
       params,
     );
     const rows = await ctx.db.all(
@@ -153,16 +164,11 @@ export function register(router: Router): void {
   router.post('/api/notes', async (ctx: Ctx) => {
     const { customerId, userId } = requireEditor(ctx);
     const body = await readJson(ctx.req);
-    const contactId = requiredString(body.contactId, 'Contact', { max: 64 });
     const content = requiredString(body.content, 'Note', { max: 20000 });
     const noteType = oneOf(body.noteType, 'Note type', NOTE_TYPES, 'other');
     const tags = tagList(body.tags);
-
-    const contact = await ctx.db.get(
-      `SELECT id FROM contacts WHERE id = ? AND customer_id = ? AND deleted_at IS NULL`,
-      [contactId, customerId],
-    );
-    if (!contact) throw badRequest('That contact was not found.', 'Contact');
+    // A note can be filed under several contacts, or none at all.
+    const contactIds = await resolveContactIds(ctx, body, customerId);
 
     // The timestamp is generated here and never accepted from the client -- a
     // hand-typed date was the single biggest gap in the old process.
@@ -173,8 +179,9 @@ export function register(router: Router): void {
          (id, customer_id, contact_id, note_type, content, tags, source,
           created_at, updated_at, created_by, last_edited_by)
        VALUES (?, ?, ?, ?, ?, ?, 'manual', ?, ?, ?, ?)`,
-      [id, customerId, contactId, noteType, content, JSON.stringify(tags), timestamp, timestamp, userId, userId],
+      [id, customerId, contactIds[0] ?? null, noteType, content, JSON.stringify(tags), timestamp, timestamp, userId, userId],
     );
+    await syncNoteContacts(ctx, { customerId, noteId: id, contactIds });
 
     const row = await ctx.db.get(`${SELECT_NOTE} WHERE n.id = ?`, [id]);
     return jsonResponse({ note: noteOut(row!) }, { status: 201 });
@@ -190,8 +197,15 @@ export function register(router: Router): void {
     if (!existing) throw notFound('That note no longer exists.');
 
     const body = await readJson(ctx.req);
+    // Contacts are only rewritten when the caller sends them, so edits that omit
+    // the field leave the existing links untouched.
+    const contactsProvided = 'contactIds' in body || 'contactId' in body;
+    const contactIds = contactsProvided ? await resolveContactIds(ctx, body, customerId) : null;
+
     await ctx.db.run(
-      `UPDATE notes SET content = ?, note_type = ?, tags = ?, updated_at = ?, last_edited_by = ?
+      `UPDATE notes SET content = ?, note_type = ?, tags = ?, updated_at = ?, last_edited_by = ?${
+        contactIds ? ', contact_id = ?' : ''
+      }
         WHERE id = ? AND customer_id = ?`,
       [
         requiredString(body.content, 'Note', { max: 20000 }),
@@ -199,10 +213,12 @@ export function register(router: Router): void {
         JSON.stringify(tagList(body.tags)),
         nowIso(),
         userId,
+        ...(contactIds ? [contactIds[0] ?? null] : []),
         ctx.params.id!,
         customerId,
       ],
     );
+    if (contactIds) await syncNoteContacts(ctx, { customerId, noteId: ctx.params.id!, contactIds });
 
     const row = await ctx.db.get(`${SELECT_NOTE} WHERE n.id = ?`, [ctx.params.id!]);
     return jsonResponse({ note: noteOut(row!) });
@@ -216,11 +232,17 @@ export function register(router: Router): void {
     );
     if (!existing) throw notFound('That note no longer exists.');
 
-    await ctx.db.run(`UPDATE notes SET deleted_at = ?, last_edited_by = ? WHERE id = ? AND customer_id = ?`, [
-      nowIso(),
-      userId,
-      ctx.params.id!,
-      customerId,
+    const timestamp = nowIso();
+    await ctx.db.batch([
+      {
+        sql: `UPDATE notes SET deleted_at = ?, last_edited_by = ? WHERE id = ? AND customer_id = ?`,
+        params: [timestamp, userId, ctx.params.id!, customerId],
+      },
+      {
+        // Attachments filed under this note go with it.
+        sql: `UPDATE documents SET deleted_at = ?, deleted_by = ? WHERE note_id = ? AND deleted_at IS NULL`,
+        params: [timestamp, userId, ctx.params.id!],
+      },
     ]);
     await audit(ctx.db, {
       customerId,
@@ -233,6 +255,51 @@ export function register(router: Router): void {
     });
     return jsonResponse({ ok: true });
   });
+}
+
+/** Validates and de-duplicates the contact ids a note is being filed under (zero allowed). */
+async function resolveContactIds(
+  ctx: Ctx,
+  body: Record<string, unknown>,
+  customerId: string,
+): Promise<string[]> {
+  const raw = Array.isArray(body.contactIds)
+    ? (body.contactIds as unknown[])
+    : body.contactId != null
+      ? [body.contactId]
+      : [];
+  const ids: string[] = [];
+  for (const value of raw) {
+    if (typeof value !== 'string' || !value) continue;
+    if (!ids.includes(value)) ids.push(value);
+  }
+  for (const id of ids) {
+    const contact = await ctx.db.get(
+      `SELECT id FROM contacts WHERE id = ? AND customer_id = ? AND deleted_at IS NULL`,
+      [id, customerId],
+    );
+    if (!contact) throw badRequest('That contact was not found.', 'Contact');
+  }
+  return ids;
+}
+
+/** Rewrites a note's contact links to exactly `contactIds`. */
+async function syncNoteContacts(
+  ctx: Ctx,
+  input: { customerId: string; noteId: string; contactIds: string[] },
+): Promise<void> {
+  const writes: { sql: string; params: SqlParam[] }[] = [
+    { sql: `DELETE FROM note_contacts WHERE note_id = ?`, params: [input.noteId] },
+  ];
+  const timestamp = nowIso();
+  for (const contactId of input.contactIds) {
+    writes.push({
+      sql: `INSERT INTO note_contacts (id, customer_id, note_id, contact_id, created_at)
+            VALUES (?, ?, ?, ?, ?)`,
+      params: [newId(), input.customerId, input.noteId, contactId, timestamp],
+    });
+  }
+  await ctx.db.batch(writes);
 }
 
 /**
@@ -269,6 +336,10 @@ export async function createSystemNote(
       input.userId ?? null,
       input.userId ?? null,
     ],
+  );
+  await db.run(
+    `INSERT INTO note_contacts (id, customer_id, note_id, contact_id, created_at) VALUES (?, ?, ?, ?, ?)`,
+    [newId(), input.customerId, id, input.contactId, timestamp],
   );
   return id;
 }

@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { ContactForm, OrganizationForm } from '../components/forms.tsx';
 import { ConfirmDialog, Modal, SlideOver } from '../components/overlays.tsx';
 import {
   Avatar,
   Chip,
+  CollapsibleList,
   EmptyState,
   ErrorBlock,
   LoadingBlock,
@@ -13,12 +14,13 @@ import {
   SectionHeader,
   Select,
   StatusChip,
+  TextInput,
 } from '../components/ui.tsx';
-import { ApiError, api, buildQuery } from '../lib/api.ts';
+import { ApiError, api, buildQuery, openDocument } from '../lib/api.ts';
 import { ORG_STATUSES, ORG_TYPES } from '../lib/constants.ts';
-import { formatRelative, humanise } from '../lib/format.ts';
+import { formatBytes, formatRelative, humanise } from '../lib/format.ts';
 import { useApi, useDebounced } from '../lib/hooks.ts';
-import type { Contact, Organization, OrganizationsResponse } from '../lib/types.ts';
+import type { Contact, CrmDocument, Organization, OrganizationsResponse } from '../lib/types.ts';
 import { useAuth } from '../state/AuthContext.tsx';
 import { useToast } from '../state/ToastContext.tsx';
 
@@ -238,7 +240,60 @@ function OrganizationPanel({
     linking ? '/contacts?limit=200&sort=name' : null,
   );
 
+  const documents = useApi<{ documents: CrmDocument[] }>(
+    `/documents?organizationId=${organizationId}`,
+  );
+  const [uploading, setUploading] = useState(false);
+  const [renaming, setRenaming] = useState<CrmDocument | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const fileInput = useRef<HTMLInputElement>(null);
+
   const organization = data?.organization;
+
+  async function uploadDocument(file: File) {
+    setUploading(true);
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      form.append('organizationId', organizationId);
+      await api.post('/documents', form);
+      toast.success(`${file.name} uploaded.`);
+      documents.reload();
+      reload();
+      onChanged();
+    } catch (caught) {
+      toast.error(caught instanceof ApiError ? caught.message : 'That file could not be uploaded.');
+    } finally {
+      setUploading(false);
+      if (fileInput.current) fileInput.current.value = '';
+    }
+  }
+
+  async function saveRename() {
+    if (!renaming) return;
+    const fileName = renameValue.trim();
+    if (!fileName) return;
+    try {
+      await api.put(`/documents/${renaming.id}`, { fileName });
+      toast.success('Attachment renamed.');
+      setRenaming(null);
+      documents.reload();
+    } catch (caught) {
+      toast.error(caught instanceof ApiError ? caught.message : 'That attachment could not be renamed.');
+    }
+  }
+
+  async function removeDocument(doc: CrmDocument) {
+    try {
+      await api.delete(`/documents/${doc.id}`);
+      toast.success('Attachment removed.');
+      documents.reload();
+      reload();
+      onChanged();
+    } catch {
+      toast.error('That attachment could not be removed.');
+    }
+  }
 
   async function link() {
     if (!linkId) {
@@ -291,7 +346,7 @@ function OrganizationPanel({
   }
 
   const unlinked = (allContacts?.contacts ?? []).filter(
-    (contact) => contact.organizationId !== organizationId,
+    (contact) => !contact.organizations.some((org) => org.id === organizationId),
   );
 
   return (
@@ -387,39 +442,131 @@ function OrganizationPanel({
                 ) : undefined
               }
             />
-            {data && data.contacts.length === 0 && (
+            {data && data.contacts.length === 0 ? (
               <p className="text-sm text-slate-500">
                 Nobody linked yet. Link an existing contact or add a new one.
               </p>
-            )}
-            <ul className="space-y-2">
-              {(data?.contacts ?? []).map((contact) => (
-                <li
-                  key={contact.id}
-                  className="flex items-center gap-3 rounded-lg border border-slate-200 p-3"
-                >
-                  <Avatar name={contact.fullName} />
-                  <div className="min-w-0 flex-1">
-                    <Link
-                      to={`/contacts?open=${contact.id}`}
-                      onClick={onClose}
-                      className="block truncate font-semibold text-navy-800 hover:underline"
-                    >
-                      {contact.fullName}
-                    </Link>
-                    <p className="truncate text-xs text-slate-500">
-                      {contact.orgRole ?? 'Role not recorded'} ·{' '}
-                      {formatRelative(contact.lastInteractionAt)}
-                    </p>
+            ) : (
+              <CollapsibleList
+                items={data?.contacts ?? []}
+                getKey={(contact) => contact.id}
+                searchText={(contact) => `${contact.fullName} ${contact.orgRole ?? ''}`}
+                searchPlaceholder="Search people here"
+                emptyText="No people match that."
+                renderItem={(contact) => (
+                  <div className="flex items-center gap-3 rounded-lg border border-slate-200 p-3">
+                    <Avatar name={contact.fullName} />
+                    <div className="min-w-0 flex-1">
+                      <Link
+                        to={`/contacts?open=${contact.id}`}
+                        onClick={onClose}
+                        className="block truncate font-semibold text-navy-800 hover:underline"
+                      >
+                        {contact.fullName}
+                      </Link>
+                      <p className="truncate text-xs text-slate-500">
+                        {contact.orgRole ?? 'Role not recorded'} ·{' '}
+                        {formatRelative(contact.lastInteractionAt)}
+                      </p>
+                    </div>
+                    {canEdit && (
+                      <button type="button" className="btn-quiet" onClick={() => unlink(contact)}>
+                        Unlink
+                      </button>
+                    )}
                   </div>
-                  {canEdit && (
-                    <button type="button" className="btn-quiet" onClick={() => unlink(contact)}>
-                      Unlink
+                )}
+              />
+            )}
+          </section>
+
+          <section>
+            <SectionHeader
+              title="Attachments"
+              count={documents.data?.documents.length}
+              action={
+                canEdit ? (
+                  <>
+                    <input
+                      ref={fileInput}
+                      type="file"
+                      className="sr-only"
+                      onChange={(event) => {
+                        const file = event.target.files?.[0];
+                        if (file) uploadDocument(file);
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="btn-quiet"
+                      disabled={uploading}
+                      onClick={() => fileInput.current?.click()}
+                    >
+                      {uploading ? 'Uploading...' : '+ Add attachment'}
                     </button>
-                  )}
-                </li>
-              ))}
-            </ul>
+                  </>
+                ) : undefined
+              }
+            />
+            {documents.data && documents.data.documents.length === 0 ? (
+              <p className="text-sm text-slate-500">
+                No attachments yet. PDF, image, Word, Excel and text files are accepted.
+              </p>
+            ) : (
+              <CollapsibleList
+                items={documents.data?.documents ?? []}
+                getKey={(doc) => doc.id}
+                searchText={(doc) => doc.fileName}
+                searchPlaceholder="Search attachments"
+                emptyText="No attachments match that."
+                renderItem={(doc) => (
+                  <div className="flex items-center gap-3 rounded-lg border border-slate-200 p-3">
+                    <span
+                      className="grid h-9 w-9 shrink-0 place-items-center rounded bg-navy-50 text-navy-600"
+                      aria-hidden="true"
+                    >
+                      ▤
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold text-navy-800">{doc.fileName}</p>
+                      <p className="text-xs text-slate-500">{formatBytes(doc.fileSize)}</p>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn-quiet"
+                      onClick={() =>
+                        openDocument(doc.id).catch(() =>
+                          toast.error('That attachment could not be opened.'),
+                        )
+                      }
+                    >
+                      Download
+                    </button>
+                    {canEdit && (
+                      <>
+                        <button
+                          type="button"
+                          className="btn-quiet"
+                          onClick={() => {
+                            setRenaming(doc);
+                            setRenameValue(doc.fileName);
+                          }}
+                        >
+                          Rename
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-quiet text-urgent hover:bg-red-50"
+                          onClick={() => removeDocument(doc)}
+                        >
+                          Remove
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
+              />
+            )}
           </section>
         </div>
       )}
@@ -479,7 +626,8 @@ function OrganizationPanel({
             />
           </label>
           <p className="text-xs text-slate-500">
-            A contact belongs to one organization at a time. Linking moves them here.
+            A contact can belong to several organizations. Linking adds them here without
+            removing them from anywhere else.
           </p>
           <div className="flex flex-col-reverse gap-2 border-t border-slate-200 pt-4 sm:flex-row sm:justify-end">
             <button type="button" className="btn-ghost" onClick={() => setLinking(false)} disabled={busy}>
@@ -487,6 +635,33 @@ function OrganizationPanel({
             </button>
             <button type="button" className="btn-primary" onClick={link} disabled={busy}>
               {busy ? 'Linking...' : 'Link contact'}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal open={!!renaming} title="Rename attachment" onClose={() => setRenaming(null)}>
+        <div className="space-y-4">
+          <label className="block">
+            <span className="label">File name</span>
+            <TextInput
+              value={renameValue}
+              onChange={(event) => setRenameValue(event.target.value)}
+              autoFocus
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  saveRename();
+                }
+              }}
+            />
+          </label>
+          <div className="flex flex-col-reverse gap-2 border-t border-slate-200 pt-4 sm:flex-row sm:justify-end">
+            <button type="button" className="btn-ghost" onClick={() => setRenaming(null)}>
+              Cancel
+            </button>
+            <button type="button" className="btn-primary" onClick={saveRename} disabled={!renameValue.trim()}>
+              Save name
             </button>
           </div>
         </div>

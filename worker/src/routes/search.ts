@@ -31,8 +31,9 @@ export function register(router: Router): void {
 
       db.all(
         `SELECT o.*,
-                (SELECT COUNT(*) FROM contacts c
-                   WHERE c.organization_id = o.id AND c.deleted_at IS NULL) AS contact_count
+                (SELECT COUNT(*) FROM contact_organizations co
+                   JOIN contacts c ON c.id = co.contact_id AND c.deleted_at IS NULL
+                  WHERE co.organization_id = o.id) AS contact_count
            FROM organizations o
           WHERE o.customer_id = ? AND o.deleted_at IS NULL
             AND (LOWER(o.name) LIKE ? OR LOWER(COALESCE(o.relationship, '')) LIKE ?)
@@ -41,9 +42,11 @@ export function register(router: Router): void {
       ),
 
       db.all(
-        `SELECT n.*, (c.first_name || ' ' || c.last_name) AS contact_name, u.name AS created_by_name
+        `SELECT n.*,
+                CASE WHEN c.id IS NULL THEN NULL ELSE (c.first_name || ' ' || c.last_name) END AS contact_name,
+                u.name AS created_by_name
            FROM notes n
-           JOIN contacts c ON c.id = n.contact_id
+           LEFT JOIN contacts c ON c.id = n.contact_id
            LEFT JOIN users u ON u.id = n.created_by
           WHERE n.customer_id = ? AND n.deleted_at IS NULL
             AND (LOWER(n.content) LIKE ? OR LOWER(n.tags) LIKE ?)

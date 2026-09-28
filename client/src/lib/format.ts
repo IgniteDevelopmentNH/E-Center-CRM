@@ -109,6 +109,11 @@ export function truncate(text: string, max: number): string {
   return clean.length <= max ? clean : `${clean.slice(0, max - 1)}...`;
 }
 
+/** Tags are shown as plain text: strip a legacy leading "#" so older data reads cleanly. */
+export function displayTag(tag: string): string {
+  return tag.replace(/^#+/, '');
+}
+
 /** Turns snake_case enum values into display text. */
 export function humanise(value: string): string {
   return value

@@ -112,8 +112,8 @@ export function register(router: Router): void {
 
         db.all<Record<string, unknown>>(
           `SELECT n.id, n.contact_id, n.content, n.created_at, n.note_type,
-                  (c.first_name || ' ' || c.last_name) AS contact_name
-             FROM notes n JOIN contacts c ON c.id = n.contact_id
+                  CASE WHEN c.id IS NULL THEN NULL ELSE (c.first_name || ' ' || c.last_name) END AS contact_name
+             FROM notes n LEFT JOIN contacts c ON c.id = n.contact_id
             WHERE n.customer_id = ? AND n.deleted_at IS NULL AND n.created_at >= ?
             ORDER BY n.created_at DESC LIMIT 10`,
           [customerId, since],
@@ -141,9 +141,9 @@ export function register(router: Router): void {
       ...recentNotes.map((row) => ({
         type: 'note' as const,
         at: String(row.created_at),
-        title: String(row.contact_name),
+        title: row.contact_name ? String(row.contact_name) : 'Note',
         detail: String(row.content).replace(/\s+/g, ' ').slice(0, 140),
-        contactId: String(row.contact_id),
+        contactId: row.contact_id ? String(row.contact_id) : null,
         entityId: String(row.id),
       })),
       ...newContacts.map((row) => ({

@@ -27,16 +27,26 @@ const SELECT_CONTACT = `
          o.name AS organization_name,
          creator.name AS created_by_name,
          (SELECT MAX(n.created_at) FROM notes n
-            WHERE n.contact_id = c.id AND n.deleted_at IS NULL) AS last_interaction_at,
+            WHERE n.deleted_at IS NULL
+              AND (n.contact_id = c.id
+                   OR EXISTS (SELECT 1 FROM note_contacts nc WHERE nc.note_id = n.id AND nc.contact_id = c.id))) AS last_interaction_at,
          (SELECT COUNT(*) FROM notes n
-            WHERE n.contact_id = c.id AND n.deleted_at IS NULL) AS note_count,
+            WHERE n.deleted_at IS NULL
+              AND (n.contact_id = c.id
+                   OR EXISTS (SELECT 1 FROM note_contacts nc WHERE nc.note_id = n.id AND nc.contact_id = c.id))) AS note_count,
          (SELECT COUNT(*) FROM tasks t
             WHERE t.contact_id = c.id AND t.deleted_at IS NULL AND t.status <> 'complete') AS open_task_count,
          (SELECT COUNT(*) FROM documents d
             WHERE d.contact_id = c.id AND d.deleted_at IS NULL) AS document_count,
          (SELECT n.content FROM notes n
-            WHERE n.contact_id = c.id AND n.deleted_at IS NULL
-            ORDER BY n.created_at DESC LIMIT 1) AS latest_note
+            WHERE n.deleted_at IS NULL
+              AND (n.contact_id = c.id
+                   OR EXISTS (SELECT 1 FROM note_contacts nc WHERE nc.note_id = n.id AND nc.contact_id = c.id))
+            ORDER BY n.created_at DESC LIMIT 1) AS latest_note,
+         (SELECT json_group_array(json_object('id', org.id, 'name', org.name, 'role', co.org_role))
+            FROM contact_organizations co
+            JOIN organizations org ON org.id = co.organization_id AND org.deleted_at IS NULL
+           WHERE co.contact_id = c.id) AS organizations_json
     FROM contacts c
     LEFT JOIN organizations o ON o.id = c.organization_id
     LEFT JOIN users creator ON creator.id = c.created_by`;
@@ -81,7 +91,10 @@ function buildFilters(customerId: string, query: URLSearchParams) {
 
   const organizationId = query.get('organizationId');
   if (organizationId) {
-    where.push('c.organization_id = ?');
+    where.push(
+      `EXISTS (SELECT 1 FROM contact_organizations co
+                WHERE co.contact_id = c.id AND co.organization_id = ?)`,
+    );
     params.push(organizationId);
   }
 
@@ -245,6 +258,13 @@ export function register(router: Router): void {
       ],
     );
 
+    await syncContactOrganizations(ctx, {
+      customerId,
+      contactId: id,
+      organizationIds: fields.organizationIds,
+      orgRole: fields.orgRole,
+    });
+
     const row = await ctx.db.get(`${SELECT_CONTACT} WHERE c.id = ?`, [id]);
     return jsonResponse({ contact: contactOut(row!) }, { status: 201 });
   });
@@ -282,6 +302,13 @@ export function register(router: Router): void {
         customerId,
       ],
     );
+
+    await syncContactOrganizations(ctx, {
+      customerId,
+      contactId: ctx.params.id!,
+      organizationIds: fields.organizationIds,
+      orgRole: fields.orgRole,
+    });
 
     const row = await ctx.db.get(`${SELECT_CONTACT} WHERE c.id = ?`, [ctx.params.id!]);
     return jsonResponse({ contact: contactOut(row!) });
@@ -339,19 +366,42 @@ export function register(router: Router): void {
     if (!existing) throw notFound('That contact no longer exists.');
 
     const timestamp = nowIso();
+    const id = ctx.params.id!;
     // Cascades the soft delete atomically so the timeline and task lists stay consistent.
+    // A note shared with other contacts survives; only notes left with no contact go.
     await ctx.db.batch([
       {
         sql: `UPDATE contacts SET deleted_at = ?, updated_at = ?, last_edited_by = ? WHERE id = ? AND customer_id = ?`,
-        params: [timestamp, timestamp, userId, ctx.params.id!, customerId],
+        params: [timestamp, timestamp, userId, id, customerId],
       },
       {
-        sql: `UPDATE notes SET deleted_at = ? WHERE contact_id = ? AND deleted_at IS NULL`,
-        params: [timestamp, ctx.params.id!],
+        sql: `DELETE FROM contact_organizations WHERE contact_id = ?`,
+        params: [id],
+      },
+      {
+        // Soft-delete notes that this contact was the only contact of.
+        sql: `UPDATE notes SET deleted_at = ?
+                WHERE deleted_at IS NULL
+                  AND (id IN (SELECT note_id FROM note_contacts WHERE contact_id = ?) OR contact_id = ?)
+                  AND NOT EXISTS (SELECT 1 FROM note_contacts nc WHERE nc.note_id = notes.id AND nc.contact_id <> ?)`,
+        params: [timestamp, id, id, id],
+      },
+      {
+        // Repoint the primary contact of surviving shared notes off this contact.
+        sql: `UPDATE notes SET contact_id = (
+                 SELECT nc.contact_id FROM note_contacts nc
+                  WHERE nc.note_id = notes.id AND nc.contact_id <> ?
+                  ORDER BY nc.created_at ASC LIMIT 1)
+                WHERE deleted_at IS NULL AND contact_id = ?`,
+        params: [id, id],
+      },
+      {
+        sql: `DELETE FROM note_contacts WHERE contact_id = ?`,
+        params: [id],
       },
       {
         sql: `UPDATE tasks SET deleted_at = ? WHERE contact_id = ? AND deleted_at IS NULL`,
-        params: [timestamp, ctx.params.id!],
+        params: [timestamp, id],
       },
     ]);
 
@@ -371,12 +421,23 @@ export function register(router: Router): void {
 /** Shared field parsing for create and update. */
 async function parseContact(ctx: Ctx, body: Record<string, unknown>, customerId: string) {
   const tags = tagList(body.tags);
-  const organizationId = optionalId(body.organizationId, 'Organization');
 
-  if (organizationId) {
+  // A contact can belong to several organizations. Accept the new `organizationIds`
+  // array; fall back to the single `organizationId` for older callers.
+  const rawIds = Array.isArray(body.organizationIds)
+    ? (body.organizationIds as unknown[])
+    : body.organizationId != null
+      ? [body.organizationId]
+      : [];
+  const organizationIds: string[] = [];
+  for (const raw of rawIds) {
+    const id = optionalId(raw, 'Organization');
+    if (id && !organizationIds.includes(id)) organizationIds.push(id);
+  }
+  for (const id of organizationIds) {
     const org = await ctx.db.get(
       `SELECT id FROM organizations WHERE id = ? AND customer_id = ? AND deleted_at IS NULL`,
-      [organizationId, customerId],
+      [id, customerId],
     );
     if (!org) throw badRequest('That organization was not found.', 'Organization');
   }
@@ -395,9 +456,41 @@ async function parseContact(ctx: Ctx, body: Record<string, unknown>, customerId:
     tags: JSON.stringify(
       isStudentFounder && !tags.includes('Student Founder') ? [...tags, 'Student Founder'] : tags,
     ),
-    organizationId,
+    // The first selected organization is the "primary" one mirrored onto the row.
+    organizationId: organizationIds[0] ?? null,
+    organizationIds,
     orgRole: optionalString(body.orgRole, 'Role', { max: 120 }),
     status: oneOf(body.status, 'Status', CONTACT_STATUSES, 'active'),
     isStudentFounder: isStudentFounder ? 1 : 0,
   };
+}
+
+/**
+ * Rewrites a contact's organization memberships to exactly `organizationIds`.
+ * The role is stored against the primary (first) organization only, matching the
+ * single "Role there" field the form collects.
+ */
+async function syncContactOrganizations(
+  ctx: Ctx,
+  input: { customerId: string; contactId: string; organizationIds: string[]; orgRole: string | null },
+): Promise<void> {
+  const writes: { sql: string; params: SqlParam[] }[] = [
+    { sql: `DELETE FROM contact_organizations WHERE contact_id = ?`, params: [input.contactId] },
+  ];
+  const timestamp = nowIso();
+  input.organizationIds.forEach((organizationId, index) => {
+    writes.push({
+      sql: `INSERT INTO contact_organizations (id, customer_id, contact_id, organization_id, org_role, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)`,
+      params: [
+        newId(),
+        input.customerId,
+        input.contactId,
+        organizationId,
+        index === 0 ? input.orgRole : null,
+        timestamp,
+      ],
+    });
+  });
+  await ctx.db.batch(writes);
 }

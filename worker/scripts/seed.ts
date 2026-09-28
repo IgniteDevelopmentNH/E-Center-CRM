@@ -48,7 +48,9 @@ const CUSTOMER_SCOPED_TABLES = [
   'events',
   'sessions',
   'tasks',
+  'note_contacts',
   'notes',
+  'contact_organizations',
   'contacts',
   'organizations',
   'user_preferences',
@@ -358,9 +360,23 @@ export async function seedDemoData(
         lisa,
       ],
     );
+    if (contact.organizationId) {
+      await db.run(
+        `INSERT INTO contact_organizations (id, customer_id, contact_id, organization_id, org_role, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [newId(), customerId, contact.id, contact.organizationId, contact.orgRole, createdAt],
+      );
+    }
   }
 
   const byName = (first: string) => contacts.find((c) => c.firstName === first)!.id;
+
+  // Marcus advises a second organization too -- demonstrates multi-org membership.
+  await db.run(
+    `INSERT INTO contact_organizations (id, customer_id, contact_id, organization_id, org_role, created_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [newId(), customerId, byName('Marcus'), alliance!.id, 'Advisory Board', nowIso()],
+  );
 
   const notes = [
     {
@@ -368,7 +384,7 @@ export async function seedDemoData(
       noteType: 'meeting',
       daysAgo: 4,
       author: lisa,
-      tags: ['#FollowUp', '#Interested'],
+      tags: ['Follow up', 'Interested'],
       content:
         'Coffee at Madbury Commons. He will judge the spring pitch night and can bring one more angel. Asked whether we can send a one-pager on the Wildcat Ventures team before he commits capital.',
     },
@@ -385,7 +401,7 @@ export async function seedDemoData(
       noteType: 'meeting',
       daysAgo: 2,
       author: bella,
-      tags: ['#Needs'],
+      tags: ['Needs'],
       content:
         'Prototype review. Battery pack is failing thermal testing at 40C. She needs an intro to a materials engineer and shop time before the March demo.',
     },
@@ -402,7 +418,7 @@ export async function seedDemoData(
       noteType: 'call',
       daysAgo: 9,
       author: bella,
-      tags: ['#FollowUp'],
+      tags: ['Follow up'],
       content:
         'Firmware milestone slipped two weeks. He is carrying a heavy course load; suggested we scope the demo down rather than miss it entirely.',
     },
@@ -411,7 +427,7 @@ export async function seedDemoData(
       noteType: 'call',
       daysAgo: 6,
       author: lisa,
-      tags: ['#Interested', '#FollowUp'],
+      tags: ['Interested', 'Follow up'],
       content:
         'Sponsorship conversation. Their giving committee meets at the end of the month. She needs a budget breakdown at three levels to bring forward.',
     },
@@ -428,7 +444,7 @@ export async function seedDemoData(
       noteType: 'meeting',
       daysAgo: 11,
       author: bella,
-      tags: ['#Ideas'],
+      tags: ['Ideas'],
       content:
         'Planned the joint spring calendar. Club wants a founder panel in February; we supply two alumni speakers and the room.',
     },
@@ -437,7 +453,7 @@ export async function seedDemoData(
       noteType: 'referral',
       daysAgo: 14,
       author: lisa,
-      tags: ['#FollowUp'],
+      tags: ['Follow up'],
       content: 'She referred Owen Duplessis for a finance workshop. Also volunteered for the mentor bench starting next term.',
     },
     {
@@ -445,7 +461,7 @@ export async function seedDemoData(
       noteType: 'meeting',
       daysAgo: 19,
       author: lisa,
-      tags: ['#Needs', '#Interested'],
+      tags: ['Needs', 'Interested'],
       content:
         'Site visit in Rochester. Wants two capstone teams in the fall and floated funding an internship track. Waiting on their budget cycle in April.',
     },
@@ -454,7 +470,7 @@ export async function seedDemoData(
       noteType: 'meeting',
       daysAgo: 16,
       author: lisa,
-      tags: ['#Interested'],
+      tags: ['Interested'],
       content:
         'Coffee after the Alliance mixer. Actively looking at pre-seed hardware in the Seacoast. Asked to be told about Wildcat Ventures when they raise.',
     },
@@ -486,13 +502,14 @@ export async function seedDemoData(
 
   for (const note of notes) {
     const createdAt = isoDaysAgo(note.daysAgo);
+    const noteId = newId();
     await db.run(
       `INSERT INTO notes
          (id, customer_id, contact_id, note_type, content, tags, source,
           created_at, updated_at, created_by, last_edited_by)
        VALUES (?, ?, ?, ?, ?, ?, 'manual', ?, ?, ?, ?)`,
       [
-        newId(),
+        noteId,
         customerId,
         note.contactId,
         note.noteType,
@@ -504,6 +521,41 @@ export async function seedDemoData(
         note.author,
       ],
     );
+    await db.run(
+      `INSERT INTO note_contacts (id, customer_id, note_id, contact_id, created_at) VALUES (?, ?, ?, ?, ?)`,
+      [newId(), customerId, noteId, note.contactId, createdAt],
+    );
+  }
+
+  // A single debrief filed under both Wildcat co-founders -- demonstrates a
+  // multi-contact note.
+  {
+    const createdAt = isoDaysAgo(3);
+    const noteId = newId();
+    await db.run(
+      `INSERT INTO notes
+         (id, customer_id, contact_id, note_type, content, tags, source,
+          created_at, updated_at, created_by, last_edited_by)
+       VALUES (?, ?, ?, ?, ?, ?, 'manual', ?, ?, ?, ?)`,
+      [
+        noteId,
+        customerId,
+        byName('Priya'),
+        'meeting',
+        'Joint check-in with both Wildcat Ventures founders on the March demo plan and next steps. Filed under both of them.',
+        JSON.stringify(['Follow up', 'Needs']),
+        createdAt,
+        createdAt,
+        bella,
+        bella,
+      ],
+    );
+    for (const contactId of [byName('Priya'), byName('Daniel')]) {
+      await db.run(
+        `INSERT INTO note_contacts (id, customer_id, note_id, contact_id, created_at) VALUES (?, ?, ?, ?, ?)`,
+        [newId(), customerId, noteId, contactId, createdAt],
+      );
+    }
   }
 
   const today = todayDate();

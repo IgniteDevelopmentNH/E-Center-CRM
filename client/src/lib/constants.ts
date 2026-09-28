@@ -17,7 +17,7 @@ export const CONTACT_STATUSES = ['active', 'past', 'on_hold'] as const;
 export const NOTE_TYPES = ['email', 'call', 'meeting', 'workshop', 'referral', 'other'] as const;
 
 /** Suggested note tags. Free-text entry adds to this at will. */
-export const NOTE_TAGS = ['#FollowUp', '#Interested', '#Needs', '#Ideas', '#Intro', '#Event'] as const;
+export const NOTE_TAGS = ['Follow up', 'Interested', 'Needs', 'Ideas', 'Intro', 'Event'] as const;
 
 export const TASK_STATUSES = ['open', 'in_progress', 'complete'] as const;
 export const TASK_PRIORITIES = ['high', 'medium', 'low'] as const;

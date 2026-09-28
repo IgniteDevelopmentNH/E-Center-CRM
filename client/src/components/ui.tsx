@@ -341,6 +341,150 @@ export function TagPicker({
   );
 }
 
+/**
+ * A searchable, scrollable multi-select checklist. Used for picking several
+ * organizations for a contact, several contacts for a note, event attendees, etc.
+ */
+export function SearchableChecklist({
+  options,
+  selected,
+  onChange,
+  placeholder = 'Search...',
+  emptyText = 'No matches',
+}: {
+  options: readonly { id: string; label: string; sublabel?: string | null }[];
+  selected: string[];
+  onChange: (ids: string[]) => void;
+  placeholder?: string;
+  emptyText?: string;
+}) {
+  const [query, setQuery] = useState('');
+  const q = query.trim().toLowerCase();
+  const filtered = q
+    ? options.filter(
+        (option) =>
+          option.label.toLowerCase().includes(q) || (option.sublabel ?? '').toLowerCase().includes(q),
+      )
+    : options;
+
+  const toggle = (id: string) =>
+    onChange(selected.includes(id) ? selected.filter((value) => value !== id) : [...selected, id]);
+
+  return (
+    <div className="space-y-2">
+      <div className="relative">
+        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true">
+          ⌕
+        </span>
+        <input
+          type="search"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder={placeholder}
+          className="input pl-9"
+        />
+      </div>
+      <div className="max-h-52 space-y-0.5 overflow-y-auto rounded-lg border border-slate-200 p-2">
+        {filtered.length === 0 ? (
+          <p className="px-1 py-2 text-sm text-slate-500">{emptyText}</p>
+        ) : (
+          filtered.map((option) => (
+            <label
+              key={option.id}
+              className="flex min-h-[40px] cursor-pointer items-center gap-2.5 rounded-md px-1.5 text-sm text-slate-700 hover:bg-slate-50"
+            >
+              <input
+                type="checkbox"
+                checked={selected.includes(option.id)}
+                onChange={() => toggle(option.id)}
+                className="h-4 w-4 rounded border-slate-300 text-teal focus:ring-teal"
+              />
+              <span className="min-w-0 flex-1 truncate">
+                {option.label}
+                {option.sublabel && <span className="text-slate-400"> — {option.sublabel}</span>}
+              </span>
+            </label>
+          ))
+        )}
+      </div>
+      {selected.length > 0 && (
+        <p className="text-xs text-slate-500">
+          {selected.length} selected
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Renders a list that grows a search box once it passes `threshold` items and
+ * collapses to `initialVisible` rows with a "see more" toggle.
+ */
+export function CollapsibleList<T>({
+  items,
+  renderItem,
+  getKey,
+  searchText,
+  searchPlaceholder = 'Search...',
+  threshold = 5,
+  initialVisible = 5,
+  emptyText,
+}: {
+  items: T[];
+  renderItem: (item: T) => ReactNode;
+  getKey: (item: T) => string;
+  searchText: (item: T) => string;
+  searchPlaceholder?: string;
+  threshold?: number;
+  initialVisible?: number;
+  emptyText?: string;
+}) {
+  const [query, setQuery] = useState('');
+  const [expanded, setExpanded] = useState(false);
+  const q = query.trim().toLowerCase();
+  const filtered = q ? items.filter((item) => searchText(item).toLowerCase().includes(q)) : items;
+  const visible = expanded ? filtered : filtered.slice(0, initialVisible);
+
+  return (
+    <div className="space-y-2">
+      {items.length > threshold && (
+        <div className="relative">
+          <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true">
+            ⌕
+          </span>
+          <input
+            type="search"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder={searchPlaceholder}
+            className="input pl-9"
+          />
+        </div>
+      )}
+
+      {filtered.length === 0 ? (
+        <p className="text-sm text-slate-500">{emptyText ?? 'Nothing matches that.'}</p>
+      ) : (
+        <ul className="space-y-2">
+          {visible.map((item) => (
+            <li key={getKey(item)}>{renderItem(item)}</li>
+          ))}
+        </ul>
+      )}
+
+      {filtered.length > initialVisible && (
+        <button
+          type="button"
+          onClick={() => setExpanded((value) => !value)}
+          className="w-full rounded-lg border border-dashed border-slate-300 py-2 text-center text-xs font-semibold text-teal-700 transition hover:bg-slate-50"
+        >
+          {expanded ? 'See less' : `See all ${filtered.length}`}
+        </button>
+      )}
+    </div>
+  );
+}
+
 /* --------------------------------------------------------------- layout -- */
 
 export function SectionHeader({

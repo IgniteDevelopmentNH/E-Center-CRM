@@ -18,6 +18,23 @@ export type EventType =
   | 'other';
 export type UserRole = 'owner' | 'editor' | 'viewer';
 
+export interface OrganizationLink {
+  id: string;
+  name: string;
+  role: string | null;
+}
+
+export interface ContactLink {
+  id: string;
+  name: string;
+}
+
+export interface NoteAttachment {
+  id: string;
+  name: string;
+  size: number;
+}
+
 export interface Contact {
   id: string;
   firstName: string;
@@ -30,6 +47,7 @@ export interface Contact {
   organizationId: string | null;
   organizationName: string | null;
   orgRole: string | null;
+  organizations: OrganizationLink[];
   status: ContactStatus;
   isStudentFounder: boolean;
   dateAdded: string | null;
@@ -46,8 +64,10 @@ export interface Contact {
 
 export interface Note {
   id: string;
-  contactId: string;
+  contactId: string | null;
   contactName: string | null;
+  contacts: ContactLink[];
+  attachments: NoteAttachment[];
   noteType: NoteType;
   content: string;
   wordCount: number;
@@ -117,6 +137,7 @@ export interface CrmDocument {
   id: string;
   contactId: string | null;
   organizationId: string | null;
+  noteId: string | null;
   fileName: string;
   fileSize: number;
   fileType: string;

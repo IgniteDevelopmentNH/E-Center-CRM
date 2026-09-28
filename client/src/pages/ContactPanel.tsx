@@ -15,8 +15,8 @@ import {
   TASK_STATUS_TONES,
   TagChip,
 } from '../components/ui.tsx';
-import { ApiError, api } from '../lib/api.ts';
-import { dueLabel, formatBytes, formatDate, formatDateTime, formatRelative, humanise } from '../lib/format.ts';
+import { ApiError, api, openDocument } from '../lib/api.ts';
+import { displayTag, dueLabel, formatBytes, formatDate, formatDateTime, formatRelative, humanise } from '../lib/format.ts';
 import { useApi } from '../lib/hooks.ts';
 import type { Contact, CrmDocument, Note, Task } from '../lib/types.ts';
 import { useAuth } from '../state/AuthContext.tsx';
@@ -246,17 +246,24 @@ export function ContactPanel({
               </div>
               <div>
                 <dt className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-                  Organization
+                  {contact.organizations.length > 1 ? 'Organizations' : 'Organization'}
                 </dt>
                 <dd>
-                  {contact.organizationId ? (
-                    <Link
-                      to={`/organizations?open=${contact.organizationId}`}
-                      className="text-teal-700 hover:underline"
-                      onClick={onClose}
-                    >
-                      {contact.organizationName}
-                    </Link>
+                  {contact.organizations.length > 0 ? (
+                    <ul className="space-y-0.5">
+                      {contact.organizations.map((org) => (
+                        <li key={org.id}>
+                          <Link
+                            to={`/organizations?open=${org.id}`}
+                            className="text-teal-700 hover:underline"
+                            onClick={onClose}
+                          >
+                            {org.name}
+                          </Link>
+                          {org.role && <span className="text-slate-400"> — {org.role}</span>}
+                        </li>
+                      ))}
+                    </ul>
                   ) : (
                     <span className="text-slate-400">--</span>
                   )}
@@ -402,10 +409,29 @@ export function ContactPanel({
                       <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-slate-700">
                         {note.content}
                       </p>
+                      {note.attachments.length > 0 && (
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {note.attachments.map((attachment) => (
+                            <button
+                              key={attachment.id}
+                              type="button"
+                              onClick={() =>
+                                openDocument(attachment.id).catch(() =>
+                                  toast.error('That attachment could not be opened.'),
+                                )
+                              }
+                              className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-navy-700 transition hover:bg-slate-50"
+                            >
+                              <span aria-hidden="true">▤</span>
+                              <span className="max-w-[12rem] truncate">{attachment.name}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
                       <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-slate-400">
                         {note.tags.map((tag) => (
                           <Chip key={tag} tone="navy">
-                            {tag}
+                            {displayTag(tag)}
                           </Chip>
                         ))}
                         <span className="ml-auto">

@@ -441,6 +441,9 @@ function ContactCard({
               <p className="truncate text-sm text-slate-600">
                 {contact.orgRole ? `${contact.orgRole}, ` : ''}
                 {contact.organizationName}
+                {contact.organizations.length > 1 && (
+                  <span className="text-slate-400"> +{contact.organizations.length - 1} more</span>
+                )}
               </p>
             ) : (
               <p className="truncate text-sm text-slate-500">{contact.email}</p>

@@ -11,9 +11,9 @@ import {
   Select,
   TextInput,
 } from '../components/ui.tsx';
-import { ApiError, api, buildQuery, downloadCsv } from '../lib/api.ts';
+import { ApiError, api, buildQuery, downloadCsv, openDocument } from '../lib/api.ts';
 import { NOTE_TYPES } from '../lib/constants.ts';
-import { formatDate, formatDateTime, humanise } from '../lib/format.ts';
+import { displayTag, formatDate, formatDateTime, humanise } from '../lib/format.ts';
 import { useApi, useDebounced } from '../lib/hooks.ts';
 import type { Contact, Note, NotesResponse, TeamMember } from '../lib/types.ts';
 import { useAuth } from '../state/AuthContext.tsx';
@@ -217,7 +217,7 @@ export function NotesPage() {
                 value={tag}
                 options={(facets?.tags ?? []).map((entry) => ({
                   value: entry.tag,
-                  label: `${entry.tag} (${entry.count})`,
+                  label: `${displayTag(entry.tag)} (${entry.count})`,
                 }))}
                 includeAll
                 allLabel="Any tag"
@@ -305,7 +305,15 @@ export function NotesPage() {
                       <article className="card p-4">
                         <div className="flex flex-wrap items-start justify-between gap-2">
                           <div className="min-w-0">
-                            <h3 className="truncate font-bold text-navy-800">{note.contactName}</h3>
+                            {note.contacts.length > 0 ? (
+                              <h3 className="font-bold text-navy-800">
+                                {note.contacts.map((c) => c.name).join(', ')}
+                              </h3>
+                            ) : note.contactName ? (
+                              <h3 className="truncate font-bold text-navy-800">{note.contactName}</h3>
+                            ) : (
+                              <h3 className="font-bold italic text-slate-400">No contact</h3>
+                            )}
                             <p className="text-xs font-semibold text-teal-800">
                               {formatDateTime(note.createdAt)}
                             </p>
@@ -334,10 +342,30 @@ export function NotesPage() {
                           {note.content}
                         </p>
 
+                        {note.attachments.length > 0 && (
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {note.attachments.map((attachment) => (
+                              <button
+                                key={attachment.id}
+                                type="button"
+                                onClick={() =>
+                                  openDocument(attachment.id).catch(() =>
+                                    toast.error('That attachment could not be opened.'),
+                                  )
+                                }
+                                className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-navy-700 transition hover:bg-slate-50"
+                              >
+                                <span aria-hidden="true">▤</span>
+                                <span className="max-w-[12rem] truncate">{attachment.name}</span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+
                         <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-slate-100 pt-2 text-xs text-slate-400">
                           {note.tags.map((noteTag) => (
                             <Chip key={noteTag} tone="navy">
-                              {noteTag}
+                              {displayTag(noteTag)}
                             </Chip>
                           ))}
                           <span className="ml-auto">

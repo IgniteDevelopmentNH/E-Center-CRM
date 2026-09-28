@@ -230,7 +230,7 @@ describe('notes', () => {
   it('searches content and filters by type, tag and author', async () => {
     assert.equal((await api('GET', '/api/notes?q=thermal')).body.total, 1);
     assert.ok((await api('GET', '/api/notes?noteType=meeting')).body.total >= 4);
-    assert.ok((await api('GET', '/api/notes?tag=%23FollowUp')).body.total >= 3);
+    assert.ok((await api('GET', '/api/notes?tag=Follow%20up')).body.total >= 3);
 
     const users = await api('GET', '/api/settings/users');
     const bella = users.body.users.find((u: any) => u.email === 'bella@unh.edu');
@@ -557,5 +557,120 @@ describe('CSV export', () => {
     const body = await response.text();
     assert.ok(body.includes("'=cmd()"), 'a leading = must be escaped');
     await api('DELETE', `/api/contacts/${created.body.contact.id}`);
+  });
+});
+
+describe('multi-organization contacts', () => {
+  it('files a contact under several organizations and lists them under each', async () => {
+    const orgs = await api('GET', '/api/organizations');
+    const wildcat = orgs.body.organizations.find((o: any) => o.name === 'Wildcat Ventures');
+    const alliance = orgs.body.organizations.find((o: any) => o.name === 'NH Tech Alliance');
+
+    const created = await api('POST', '/api/contacts', {
+      firstName: 'Multi',
+      lastName: 'Org',
+      email: 'multi.org@example.com',
+      organizationIds: [wildcat.id, alliance.id],
+      orgRole: 'Advisor',
+    });
+    assert.equal(created.status, 201);
+    const contact = created.body.contact;
+    assert.equal(contact.organizations.length, 2);
+    // The first selected organization becomes the mirrored primary.
+    assert.equal(contact.organizationId, wildcat.id);
+
+    // The contact shows up in BOTH organizations' people lists.
+    const wildcatPeople = await api('GET', `/api/organizations/${wildcat.id}`);
+    const alliancePeople = await api('GET', `/api/organizations/${alliance.id}`);
+    assert.ok(wildcatPeople.body.contacts.some((c: any) => c.id === contact.id));
+    assert.ok(alliancePeople.body.contacts.some((c: any) => c.id === contact.id));
+
+    // Dropping to a single organization repoints the primary.
+    const updated = await api('PUT', `/api/contacts/${contact.id}`, {
+      firstName: 'Multi',
+      lastName: 'Org',
+      email: 'multi.org@example.com',
+      organizationIds: [alliance.id],
+    });
+    assert.equal(updated.body.contact.organizations.length, 1);
+    assert.equal(updated.body.contact.organizationId, alliance.id);
+
+    await api('DELETE', `/api/contacts/${contact.id}`);
+  });
+});
+
+describe('multi-contact notes and note attachments', () => {
+  it('files one note under several contacts, and can file a note under none', async () => {
+    const contacts = await api('GET', '/api/contacts?limit=3&sort=name');
+    const [a, b] = contacts.body.contacts;
+
+    const shared = await api('POST', '/api/notes', {
+      contactIds: [a.id, b.id],
+      content: 'Shared note across two people.',
+      noteType: 'meeting',
+    });
+    assert.equal(shared.status, 201);
+    assert.equal(shared.body.note.contacts.length, 2);
+    // Appears on both contacts' timelines.
+    assert.ok((await api('GET', `/api/notes?contactId=${a.id}`)).body.notes.some((n: any) => n.id === shared.body.note.id));
+    assert.ok((await api('GET', `/api/notes?contactId=${b.id}`)).body.notes.some((n: any) => n.id === shared.body.note.id));
+
+    const orphan = await api('POST', '/api/notes', {
+      contactIds: [],
+      content: 'A general note with no contact.',
+      noteType: 'other',
+    });
+    assert.equal(orphan.status, 201);
+    assert.equal(orphan.body.note.contactId, null);
+    assert.equal(orphan.body.note.contacts.length, 0);
+    // Still listed in the overall timeline.
+    assert.ok((await api('GET', '/api/notes?limit=200')).body.notes.some((n: any) => n.id === orphan.body.note.id));
+
+    await api('DELETE', `/api/notes/${shared.body.note.id}`);
+    await api('DELETE', `/api/notes/${orphan.body.note.id}`);
+  });
+
+  it('attaches a file to a note and returns it on the note', async () => {
+    const note = await api('POST', '/api/notes', {
+      contactIds: [],
+      content: 'Note with an attachment.',
+      noteType: 'other',
+    });
+    const form = new FormData();
+    form.append('file', new Blob(['attached bytes'], { type: 'text/plain' }), 'brief.txt');
+    form.append('noteId', note.body.note.id);
+    const upload = await api('POST', '/api/documents', form);
+    assert.equal(upload.status, 201);
+    assert.equal(upload.body.document.noteId, note.body.note.id);
+
+    const listed = await api('GET', `/api/notes?limit=200`);
+    const fresh = listed.body.notes.find((n: any) => n.id === note.body.note.id);
+    assert.equal(fresh.attachments.length, 1);
+    assert.equal(fresh.attachments[0].name, 'brief.txt');
+
+    await api('DELETE', `/api/notes/${note.body.note.id}`);
+  });
+});
+
+describe('document rename and organization attachments', () => {
+  it('uploads an attachment to an organization and renames it', async () => {
+    const orgs = await api('GET', '/api/organizations');
+    const org = orgs.body.organizations[0];
+
+    const form = new FormData();
+    form.append('file', new Blob(['org attachment'], { type: 'text/plain' }), 'original.txt');
+    form.append('organizationId', org.id);
+    const upload = await api('POST', '/api/documents', form);
+    assert.equal(upload.status, 201);
+    assert.equal(upload.body.document.organizationId, org.id);
+
+    const renamed = await api('PUT', `/api/documents/${upload.body.document.id}`, { fileName: 'renamed.txt' });
+    assert.equal(renamed.status, 200);
+    assert.equal(renamed.body.document.fileName, 'renamed.txt');
+
+    const listed = await api('GET', `/api/documents?organizationId=${org.id}`);
+    assert.ok(listed.body.documents.some((d: any) => d.fileName === 'renamed.txt'));
+
+    await api('DELETE', `/api/documents/${upload.body.document.id}`);
   });
 });

@@ -69,6 +69,40 @@ function tags(value: unknown): string[] {
   }
 }
 
+/** Parses a `json_group_array(json_object(...))` column into typed objects. */
+function jsonObjects(value: unknown): Record<string, unknown>[] {
+  if (typeof value !== 'string' || !value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.filter((row): row is Record<string, unknown> => !!row && typeof row === 'object') : [];
+  } catch {
+    return [];
+  }
+}
+
+/** {id, name, role} membership rows for a contact, sorted by organization name. */
+function organizationLinks(value: unknown) {
+  return jsonObjects(value)
+    .map((row) => ({ id: String(row.id), name: String(row.name), role: text(row.role) }))
+    .filter((row) => row.id && row.id !== 'null')
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** {id, name} contact rows for a note, sorted by name. */
+function contactLinks(value: unknown) {
+  return jsonObjects(value)
+    .map((row) => ({ id: String(row.id), name: String(row.name) }))
+    .filter((row) => row.id && row.id !== 'null')
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** {id, name, size} attachment rows for a note. */
+function attachmentLinks(value: unknown) {
+  return jsonObjects(value)
+    .map((row) => ({ id: String(row.id), name: String(row.name), size: num(row.size) }))
+    .filter((row) => row.id && row.id !== 'null');
+}
+
 export interface AuditFields {
   created_at: string;
   updated_at: string;
@@ -90,6 +124,8 @@ export function contactOut(row: Record<string, unknown>) {
     organizationId: text(row.organization_id),
     organizationName: text(row.organization_name),
     orgRole: text(row.org_role),
+    // Every organization this contact belongs to. Present when the query supplies it.
+    organizations: organizationLinks(row.organizations_json),
     status: String(row.status),
     isStudentFounder: num(row.is_student_founder) === 1,
     dateAdded: iso(row.created_at),
@@ -110,8 +146,11 @@ export function noteOut(row: Record<string, unknown>) {
   const content = String(row.content ?? '');
   return {
     id: String(row.id),
-    contactId: String(row.contact_id),
+    contactId: text(row.contact_id),
     contactName: text(row.contact_name),
+    // Every contact this note is filed under. Present when the query supplies it.
+    contacts: contactLinks(row.contacts_json),
+    attachments: attachmentLinks(row.attachments_json),
     noteType: String(row.note_type),
     content,
     wordCount: content.trim() ? content.trim().split(/\s+/).length : 0,
@@ -194,6 +233,7 @@ export function documentOut(row: Record<string, unknown>) {
     id: String(row.id),
     contactId: text(row.contact_id),
     organizationId: text(row.organization_id),
+    noteId: text(row.note_id),
     fileName: String(row.file_name),
     fileSize: num(row.file_size),
     fileType: String(row.file_type),

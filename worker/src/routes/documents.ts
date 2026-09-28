@@ -1,9 +1,9 @@
 import { audit } from '../lib/audit.ts';
-import { badRequest, jsonResponse, notFound, unauthorized } from '../lib/http.ts';
+import { badRequest, jsonResponse, notFound, readJson, unauthorized } from '../lib/http.ts';
 import { newId } from '../lib/ids.ts';
 import { signValue, verifyValue } from '../lib/signedToken.ts';
 import { nowIso } from '../lib/time.ts';
-import { optionalId } from '../lib/validate.ts';
+import { optionalId, requiredString } from '../lib/validate.ts';
 import { requireAuth, requireEditor } from '../middleware/auth.ts';
 import { documentOut } from '../records.ts';
 import type { Ctx, Router } from '../router.ts';
@@ -38,6 +38,11 @@ export function register(router: Router): void {
       where.push('d.organization_id = ?');
       params.push(organizationId);
     }
+    const noteId = ctx.query.get('noteId');
+    if (noteId) {
+      where.push('d.note_id = ?');
+      params.push(noteId);
+    }
 
     const rows = await ctx.db.all(
       `${SELECT_DOCUMENT} WHERE ${where.join(' AND ')} ORDER BY d.created_at DESC LIMIT 200`,
@@ -69,8 +74,9 @@ export function register(router: Router): void {
 
     const contactId = optionalId(form.get('contactId'), 'Contact');
     const organizationId = optionalId(form.get('organizationId'), 'Organization');
-    if (!contactId && !organizationId) {
-      throw badRequest('Attach the document to a contact or an organization.', 'Contact');
+    const noteId = optionalId(form.get('noteId'), 'Note');
+    if (!contactId && !organizationId && !noteId) {
+      throw badRequest('Attach the document to a contact, organization or note.', 'Contact');
     }
 
     // Confirm the parent belongs to this tenant before writing anything.
@@ -88,6 +94,13 @@ export function register(router: Router): void {
       );
       if (!org) throw badRequest('That organization was not found.', 'Organization');
     }
+    if (noteId) {
+      const note = await ctx.db.get(
+        `SELECT id FROM notes WHERE id = ? AND customer_id = ? AND deleted_at IS NULL`,
+        [noteId, customerId],
+      );
+      if (!note) throw badRequest('That note was not found.', 'Note');
+    }
 
     const fileName = safeFileName(file.name);
     const storageKey = buildStorageKey(customerId, fileName);
@@ -96,10 +109,10 @@ export function register(router: Router): void {
     const id = newId();
     await ctx.db.run(
       `INSERT INTO documents
-         (id, customer_id, contact_id, organization_id, file_name, file_size, file_type,
+         (id, customer_id, contact_id, organization_id, note_id, file_name, file_size, file_type,
           storage_key, uploaded_by, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [id, customerId, contactId, organizationId, fileName, file.size, file.type, storageKey, userId, nowIso()],
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, customerId, contactId, organizationId, noteId, fileName, file.size, file.type, storageKey, userId, nowIso()],
     );
 
     await audit(ctx.db, {
@@ -108,12 +121,33 @@ export function register(router: Router): void {
       action: 'document.upload',
       entityType: 'document',
       entityId: id,
-      metadata: { fileName, fileSize: file.size, contactId, organizationId },
+      metadata: { fileName, fileSize: file.size, contactId, organizationId, noteId },
       req: ctx.req,
     });
 
     const row = await ctx.db.get(`${SELECT_DOCUMENT} WHERE d.id = ?`, [id]);
     return jsonResponse({ document: documentOut(row!) }, { status: 201 });
+  });
+
+  /** Renames a document. Only the display/download name changes; the stored bytes stay put. */
+  router.put('/api/documents/:id', async (ctx: Ctx) => {
+    const { customerId, userId } = requireEditor(ctx);
+    const existing = await ctx.db.get<{ id: string }>(
+      `SELECT id FROM documents WHERE id = ? AND customer_id = ? AND deleted_at IS NULL`,
+      [ctx.params.id!, customerId],
+    );
+    if (!existing) throw notFound('That document no longer exists.');
+
+    const body = await readJson(ctx.req);
+    const fileName = safeFileName(requiredString(body.fileName, 'File name', { max: 255 }));
+    await ctx.db.run(`UPDATE documents SET file_name = ? WHERE id = ? AND customer_id = ?`, [
+      fileName,
+      ctx.params.id!,
+      customerId,
+    ]);
+
+    const row = await ctx.db.get(`${SELECT_DOCUMENT} WHERE d.id = ?`, [ctx.params.id!]);
+    return jsonResponse({ document: documentOut(row!) });
   });
 
   /** Issues a time-limited download URL and records the access. */

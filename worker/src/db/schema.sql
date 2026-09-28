@@ -88,8 +88,10 @@ CREATE TABLE IF NOT EXISTS contacts (
   phone              TEXT,
   how_we_connected   TEXT,                          -- relationship origin story (top requirement)
   tags               TEXT NOT NULL DEFAULT '[]',    -- JSON array
+  -- A contact can belong to several organizations (see contact_organizations).
+  -- This column mirrors the PRIMARY org for headline display, sorting and search.
   organization_id    TEXT REFERENCES organizations(id),
-  org_role           TEXT,                          -- role at the linked organization
+  org_role           TEXT,                          -- role at the primary organization
   status             TEXT NOT NULL DEFAULT 'active',-- active | past | on_hold
   is_student_founder INTEGER NOT NULL DEFAULT 0,    -- business data only; no student PII
   created_at         TEXT NOT NULL,
@@ -103,10 +105,26 @@ CREATE INDEX IF NOT EXISTS idx_contacts_status ON contacts(customer_id, status);
 CREATE INDEX IF NOT EXISTS idx_contacts_org ON contacts(organization_id);
 CREATE INDEX IF NOT EXISTS idx_contacts_created ON contacts(customer_id, created_at);
 
+-- Many-to-many contact <-> organization membership. The source of truth for who
+-- belongs to an organization; contacts.organization_id mirrors the primary one.
+CREATE TABLE IF NOT EXISTS contact_organizations (
+  id              TEXT PRIMARY KEY,
+  customer_id     TEXT NOT NULL REFERENCES customers(id),
+  contact_id      TEXT NOT NULL REFERENCES contacts(id),
+  organization_id TEXT NOT NULL REFERENCES organizations(id),
+  org_role        TEXT,
+  created_at      TEXT NOT NULL,
+  UNIQUE (contact_id, organization_id)
+);
+CREATE INDEX IF NOT EXISTS idx_contact_orgs_contact ON contact_organizations(contact_id);
+CREATE INDEX IF NOT EXISTS idx_contact_orgs_org ON contact_organizations(organization_id);
+
 CREATE TABLE IF NOT EXISTS notes (
   id             TEXT PRIMARY KEY,
   customer_id    TEXT NOT NULL REFERENCES customers(id),
-  contact_id     TEXT NOT NULL REFERENCES contacts(id),
+  -- A note can reference several contacts, or none (see note_contacts). This
+  -- column mirrors the PRIMARY contact (nullable) for existing single-contact views.
+  contact_id     TEXT REFERENCES contacts(id),
   note_type      TEXT NOT NULL DEFAULT 'other',   -- email | call | meeting | workshop | referral | other
   content        TEXT NOT NULL,
   tags           TEXT NOT NULL DEFAULT '[]',
@@ -119,6 +137,19 @@ CREATE TABLE IF NOT EXISTS notes (
 );
 CREATE INDEX IF NOT EXISTS idx_notes_contact ON notes(contact_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_notes_customer ON notes(customer_id, created_at);
+
+-- Many-to-many note <-> contact. Source of truth for which contacts a note is
+-- filed under; notes.contact_id mirrors the primary one.
+CREATE TABLE IF NOT EXISTS note_contacts (
+  id          TEXT PRIMARY KEY,
+  customer_id TEXT NOT NULL REFERENCES customers(id),
+  note_id     TEXT NOT NULL REFERENCES notes(id),
+  contact_id  TEXT NOT NULL REFERENCES contacts(id),
+  created_at  TEXT NOT NULL,
+  UNIQUE (note_id, contact_id)
+);
+CREATE INDEX IF NOT EXISTS idx_note_contacts_note ON note_contacts(note_id);
+CREATE INDEX IF NOT EXISTS idx_note_contacts_contact ON note_contacts(contact_id);
 
 CREATE TABLE IF NOT EXISTS tasks (
   id                   TEXT PRIMARY KEY,
@@ -180,6 +211,7 @@ CREATE TABLE IF NOT EXISTS documents (
   customer_id     TEXT NOT NULL REFERENCES customers(id),
   contact_id      TEXT REFERENCES contacts(id),
   organization_id TEXT REFERENCES organizations(id),
+  note_id         TEXT REFERENCES notes(id),        -- attachments filed under a note
   file_name       TEXT NOT NULL,
   file_size       INTEGER NOT NULL,
   file_type       TEXT NOT NULL,
@@ -190,6 +222,8 @@ CREATE TABLE IF NOT EXISTS documents (
   deleted_by      TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_documents_contact ON documents(contact_id, deleted_at);
+CREATE INDEX IF NOT EXISTS idx_documents_organization ON documents(organization_id, deleted_at);
+CREATE INDEX IF NOT EXISTS idx_documents_note ON documents(note_id, deleted_at);
 CREATE INDEX IF NOT EXISTS idx_documents_customer ON documents(customer_id, created_at);
 
 CREATE TABLE IF NOT EXISTS audit_logs (

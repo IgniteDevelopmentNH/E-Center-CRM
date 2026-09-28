@@ -52,7 +52,7 @@ export function DashboardPage() {
       <header>
         <h1 className="text-2xl font-bold text-navy-800">Good to see you, {firstName}</h1>
         <p className="mt-0.5 text-sm text-slate-500">
-          The ECenter at a glance -- what needs attention, and what is coming up.
+          The ECenter at a glance - what needs attention, and what is coming up.
         </p>
       </header>
 
@@ -67,7 +67,6 @@ export function DashboardPage() {
           label="Due this week"
           value={stats.tasksDueThisWeek}
           detail="Next 7 days"
-          tone="teal"
           onClick={() => navigate('/tasks')}
         />
         <StatCard

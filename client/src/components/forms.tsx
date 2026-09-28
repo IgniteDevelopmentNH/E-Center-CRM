@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import { ApiError, api } from '../lib/api.ts';
 import { DEFAULT_EVENT_LOCATION } from '../lib/constants.ts';
@@ -15,10 +15,11 @@ import {
   TASK_RECURRENCES,
   TASK_STATUSES,
 } from '../lib/constants.ts';
-import { toDateTimeInput, todayInput } from '../lib/format.ts';
+import { displayTag, formatBytes, toDateTimeInput, todayInput } from '../lib/format.ts';
 import { useApi } from '../lib/hooks.ts';
 import type {
   Contact,
+  CrmDocument,
   CrmEvent,
   Note,
   Organization,
@@ -27,7 +28,16 @@ import type {
   TeamMember,
 } from '../lib/types.ts';
 import { useToast } from '../state/ToastContext.tsx';
-import { Checkbox, Field, RadioGroup, Select, TagPicker, TextArea, TextInput } from './ui.tsx';
+import {
+  Checkbox,
+  Field,
+  RadioGroup,
+  SearchableChecklist,
+  Select,
+  TagPicker,
+  TextArea,
+  TextInput,
+} from './ui.tsx';
 
 /** Shared submit plumbing: busy state, field-level errors, toast on failure. */
 function useSubmit<T>(onSaved: (result: T) => void) {
@@ -103,9 +113,13 @@ export function ContactForm({
   const [phone, setPhone] = useState(initial?.phone ?? '');
   const [howWeConnected, setHowWeConnected] = useState(initial?.howWeConnected ?? '');
   const [tags, setTags] = useState<string[]>(initial?.tags ?? []);
-  const [organizationId, setOrganizationId] = useState(
-    initial?.organizationId ?? lockOrganizationId ?? '',
-  );
+  const [organizationIds, setOrganizationIds] = useState<string[]>(() => {
+    const fromContact = initial?.organizations?.map((org) => org.id) ?? [];
+    if (lockOrganizationId && !fromContact.includes(lockOrganizationId)) {
+      return [lockOrganizationId, ...fromContact];
+    }
+    return fromContact;
+  });
   const [orgRole, setOrgRole] = useState(initial?.orgRole ?? '');
   const [status, setStatus] = useState(initial?.status ?? 'active');
 
@@ -128,7 +142,7 @@ export function ContactForm({
               phone,
               howWeConnected,
               tags,
-              organizationId: organizationId || null,
+              organizationIds,
               orgRole,
               status,
             };
@@ -203,30 +217,37 @@ export function ContactForm({
         </p>
       )}
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="Organization" error={errorFor('Organization')}>
-          <select
-            className="input pr-8"
-            value={organizationId}
-            onChange={(event) => setOrganizationId(event.target.value)}
-            disabled={!!lockOrganizationId}
-          >
-            <option value="">No organization</option>
-            {(orgs?.organizations ?? []).map((org) => (
-              <option key={org.id} value={org.id}>
-                {org.name}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label="Role there" error={errorFor('Role')}>
+      <Field
+        label="Organizations"
+        hint="Check every organization this person belongs to. Search to narrow the list."
+        error={errorFor('Organization')}
+      >
+        <SearchableChecklist
+          options={(orgs?.organizations ?? []).map((org) => ({
+            id: org.id,
+            label: org.name,
+            sublabel: org.location,
+          }))}
+          selected={organizationIds}
+          onChange={setOrganizationIds}
+          placeholder="Search organizations"
+          emptyText="No organizations match that."
+        />
+      </Field>
+
+      {organizationIds.length > 0 && (
+        <Field
+          label="Role there"
+          hint="Applies to their main organization (the first one selected)."
+          error={errorFor('Role')}
+        >
           <TextInput
             value={orgRole}
             onChange={(event) => setOrgRole(event.target.value)}
             placeholder="Founder, VP Operations, ..."
           />
         </Field>
-      </div>
+      )}
 
       <Field label="Status" error={errorFor('Status')}>
         <RadioGroup
@@ -258,19 +279,38 @@ export function NoteForm({
   onSaved: (note: Note) => void;
   onCancel: () => void;
 }) {
-  const [selectedContact, setSelectedContact] = useState(initial?.contactId ?? contactId ?? '');
+  const toast = useToast();
+  const [selectedContacts, setSelectedContacts] = useState<string[]>(() => {
+    if (initial) return initial.contacts?.map((c) => c.id) ?? (initial.contactId ? [initial.contactId] : []);
+    return contactId ? [contactId] : [];
+  });
   const [noteType, setNoteType] = useState(initial?.noteType ?? 'meeting');
   const [content, setContent] = useState(initial?.content ?? '');
-  const [tags, setTags] = useState<string[]>(initial?.tags ?? []);
+  const [tags, setTags] = useState<string[]>((initial?.tags ?? []).map(displayTag));
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const fileInput = useRef<HTMLInputElement>(null);
 
-  const needsContacts = !contacts && !contactId && !initial;
   const { data: fetched } = useApi<{ contacts: Contact[] }>(
-    needsContacts ? '/contacts?limit=200&sort=name' : null,
+    contacts ? null : '/contacts?limit=200&sort=name',
   );
   const options = contacts ?? fetched?.contacts ?? [];
 
+  // Attachments already on the note being edited.
+  const existingDocs = useApi<{ documents: CrmDocument[] }>(
+    initial ? `/documents?noteId=${initial.id}` : null,
+  );
+
   const { busy, submit, errorFor } = useSubmit(onSaved);
   const words = content.trim() ? content.trim().split(/\s+/).length : 0;
+
+  async function removeExisting(doc: CrmDocument) {
+    try {
+      await api.delete(`/documents/${doc.id}`);
+      existingDocs.reload();
+    } catch {
+      toast.error('That attachment could not be removed.');
+    }
+  }
 
   return (
     <form
@@ -279,34 +319,43 @@ export function NoteForm({
         submit(
           event,
           async () => {
-            const payload = { contactId: selectedContact, noteType, content, tags };
+            const payload = { contactIds: selectedContacts, noteType, content, tags };
             const response = initial
               ? await api.put<{ note: Note }>(`/notes/${initial.id}`, payload)
               : await api.post<{ note: Note }>('/notes', payload);
-            return response.note;
+            const note = response.note;
+
+            // Upload any newly-attached files against the saved note.
+            for (const file of pendingFiles) {
+              const form = new FormData();
+              form.append('file', file);
+              form.append('noteId', note.id);
+              await api.post('/documents', form);
+            }
+            return note;
           },
           initial ? 'Note updated.' : 'Note added.',
         )
       }
       noValidate
     >
-      {!initial && !contactId && (
-        <Field label="Contact" required error={errorFor('Contact')}>
-          <select
-            className="input pr-8"
-            value={selectedContact}
-            onChange={(event) => setSelectedContact(event.target.value)}
-          >
-            <option value="">Choose a contact</option>
-            {options.map((contact) => (
-              <option key={contact.id} value={contact.id}>
-                {contact.fullName}
-                {contact.organizationName ? ` -- ${contact.organizationName}` : ''}
-              </option>
-            ))}
-          </select>
-        </Field>
-      )}
+      <Field
+        label="Contacts"
+        hint="Attach this note to any number of contacts, or none. Search to find people quickly."
+        error={errorFor('Contact')}
+      >
+        <SearchableChecklist
+          options={options.map((contact) => ({
+            id: contact.id,
+            label: contact.fullName,
+            sublabel: contact.organizationName,
+          }))}
+          selected={selectedContacts}
+          onChange={setSelectedContacts}
+          placeholder="Search contacts"
+          emptyText="No contacts match that."
+        />
+      </Field>
 
       <Field label="Type" error={errorFor('Note type')}>
         <Select
@@ -338,6 +387,57 @@ export function NoteForm({
 
       <Field label="Tags" error={errorFor('Tags')}>
         <TagPicker value={tags} onChange={setTags} suggestions={NOTE_TAGS} />
+      </Field>
+
+      <Field label="Attachments" hint="PDF, image, Word, Excel and text files are accepted.">
+        <div className="space-y-2">
+          {(existingDocs.data?.documents ?? []).map((doc) => (
+            <div
+              key={doc.id}
+              className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm"
+            >
+              <span className="min-w-0 flex-1 truncate text-navy-800">{doc.fileName}</span>
+              <span className="shrink-0 text-xs text-slate-400">{formatBytes(doc.fileSize)}</span>
+              <button
+                type="button"
+                className="btn-quiet shrink-0 text-urgent hover:bg-red-50"
+                onClick={() => removeExisting(doc)}
+              >
+                Remove
+              </button>
+            </div>
+          ))}
+          {pendingFiles.map((file, index) => (
+            <div
+              key={`${file.name}-${index}`}
+              className="flex items-center gap-2 rounded-lg border border-dashed border-teal-300 bg-teal-50 px-3 py-2 text-sm"
+            >
+              <span className="min-w-0 flex-1 truncate text-teal-800">{file.name}</span>
+              <span className="shrink-0 text-xs text-teal-700">{formatBytes(file.size)}</span>
+              <button
+                type="button"
+                className="btn-quiet shrink-0 text-urgent hover:bg-red-100"
+                onClick={() => setPendingFiles((current) => current.filter((_, i) => i !== index))}
+              >
+                Remove
+              </button>
+            </div>
+          ))}
+          <input
+            ref={fileInput}
+            type="file"
+            multiple
+            className="sr-only"
+            onChange={(event) => {
+              const files = Array.from(event.target.files ?? []);
+              if (files.length) setPendingFiles((current) => [...current, ...files]);
+              if (fileInput.current) fileInput.current.value = '';
+            }}
+          />
+          <button type="button" className="btn-ghost" onClick={() => fileInput.current?.click()}>
+            + Attach files
+          </button>
+        </div>
       </Field>
 
       <FormActions busy={busy} onCancel={onCancel} submitLabel={initial ? 'Save note' : 'Add note'} />
@@ -707,27 +807,17 @@ export function EventForm({
           label="Who is attending"
           hint="Each person linked here gets a dated attendance note on their timeline."
         >
-          <div className="max-h-52 space-y-1 overflow-y-auto rounded-lg border border-slate-200 p-2">
-            {(contactData?.contacts ?? []).map((contact) => (
-              <Checkbox
-                key={contact.id}
-                label={
-                  <span>
-                    {contact.fullName}
-                    {contact.organizationName && (
-                      <span className="text-slate-400"> -- {contact.organizationName}</span>
-                    )}
-                  </span>
-                }
-                checked={contactIds.includes(contact.id)}
-                onChange={(checked) =>
-                  setContactIds((current) =>
-                    checked ? [...current, contact.id] : current.filter((id) => id !== contact.id),
-                  )
-                }
-              />
-            ))}
-          </div>
+          <SearchableChecklist
+            options={(contactData?.contacts ?? []).map((contact) => ({
+              id: contact.id,
+              label: contact.fullName,
+              sublabel: contact.organizationName,
+            }))}
+            selected={contactIds}
+            onChange={setContactIds}
+            placeholder="Search contacts"
+            emptyText="No contacts match that."
+          />
         </Field>
       )}
 

@@ -10,13 +10,19 @@ import type { Ctx, Router } from '../router.ts';
 
 const SELECT_ORG = `
   SELECT o.*,
-         (SELECT COUNT(*) FROM contacts c
-            WHERE c.organization_id = o.id AND c.deleted_at IS NULL) AS contact_count,
+         (SELECT COUNT(*) FROM contact_organizations co
+            JOIN contacts c ON c.id = co.contact_id AND c.deleted_at IS NULL
+           WHERE co.organization_id = o.id) AS contact_count,
          (SELECT COUNT(*) FROM documents d
             WHERE d.organization_id = o.id AND d.deleted_at IS NULL) AS document_count,
          (SELECT MAX(n.created_at) FROM notes n
-            JOIN contacts c2 ON c2.id = n.contact_id
-            WHERE c2.organization_id = o.id AND n.deleted_at IS NULL) AS last_activity_at
+            WHERE n.deleted_at IS NULL
+              AND EXISTS (
+                SELECT 1 FROM contact_organizations co
+                 WHERE co.organization_id = o.id
+                   AND (co.contact_id = n.contact_id
+                        OR EXISTS (SELECT 1 FROM note_contacts nc
+                                    WHERE nc.note_id = n.id AND nc.contact_id = co.contact_id)))) AS last_activity_at
     FROM organizations o`;
 
 const SORTS: Record<string, string> = {
@@ -87,11 +93,19 @@ export function register(router: Router): void {
 
     const contacts = await ctx.db.all(
       `SELECT c.*, o.name AS organization_name,
+              co.org_role AS org_role,
               (SELECT MAX(n.created_at) FROM notes n
-                 WHERE n.contact_id = c.id AND n.deleted_at IS NULL) AS last_interaction_at
-         FROM contacts c
+                 WHERE n.deleted_at IS NULL
+                   AND (n.contact_id = c.id
+                        OR EXISTS (SELECT 1 FROM note_contacts nc WHERE nc.note_id = n.id AND nc.contact_id = c.id))) AS last_interaction_at,
+              (SELECT json_group_array(json_object('id', org.id, 'name', org.name, 'role', co2.org_role))
+                 FROM contact_organizations co2
+                 JOIN organizations org ON org.id = co2.organization_id AND org.deleted_at IS NULL
+                WHERE co2.contact_id = c.id) AS organizations_json
+         FROM contact_organizations co
+         JOIN contacts c ON c.id = co.contact_id AND c.deleted_at IS NULL
          LEFT JOIN organizations o ON o.id = c.organization_id
-        WHERE c.organization_id = ? AND c.customer_id = ? AND c.deleted_at IS NULL
+        WHERE co.organization_id = ? AND co.customer_id = ?
         ORDER BY LOWER(c.last_name) ASC, LOWER(c.first_name) ASC`,
       [ctx.params.id!, customerId],
     );
@@ -183,21 +197,51 @@ export function register(router: Router): void {
     );
     if (!contact) throw badRequest('That contact was not found.', 'Contact');
 
-    await ctx.db.run(
-      `UPDATE contacts SET organization_id = ?, org_role = ?, updated_at = ?, last_edited_by = ?
-        WHERE id = ? AND customer_id = ?`,
-      [ctx.params.id!, orgRole, nowIso(), userId, contactId, customerId],
+    const existingLink = await ctx.db.get(
+      `SELECT id FROM contact_organizations WHERE contact_id = ? AND organization_id = ?`,
+      [contactId, ctx.params.id!],
     );
+    if (existingLink) throw badRequest('That contact is already linked here.', 'Contact');
+
+    const timestamp = nowIso();
+    // Add the membership, and adopt this org as the contact's primary if they had none.
+    await ctx.db.batch([
+      {
+        sql: `INSERT INTO contact_organizations (id, customer_id, contact_id, organization_id, org_role, created_at)
+              VALUES (?, ?, ?, ?, ?, ?)`,
+        params: [newId(), customerId, contactId, ctx.params.id!, orgRole, timestamp],
+      },
+      {
+        sql: `UPDATE contacts SET organization_id = ?, org_role = ?, updated_at = ?, last_edited_by = ?
+                WHERE id = ? AND customer_id = ? AND organization_id IS NULL`,
+        params: [ctx.params.id!, orgRole, timestamp, userId, contactId, customerId],
+      },
+    ]);
     return jsonResponse({ ok: true });
   });
 
   router.delete('/api/organizations/:id/contacts/:contactId', async (ctx: Ctx) => {
     const { customerId, userId } = requireEditor(ctx);
-    await ctx.db.run(
-      `UPDATE contacts SET organization_id = NULL, org_role = NULL, updated_at = ?, last_edited_by = ?
-        WHERE id = ? AND organization_id = ? AND customer_id = ?`,
-      [nowIso(), userId, ctx.params.contactId!, ctx.params.id!, customerId],
-    );
+    const timestamp = nowIso();
+    const orgId = ctx.params.id!;
+    const contactId = ctx.params.contactId!;
+    // Remove the membership; if it was the primary org, repoint to another (or none).
+    await ctx.db.batch([
+      {
+        sql: `DELETE FROM contact_organizations WHERE contact_id = ? AND organization_id = ? AND customer_id = ?`,
+        params: [contactId, orgId, customerId],
+      },
+      {
+        sql: `UPDATE contacts SET
+                 organization_id = (SELECT co.organization_id FROM contact_organizations co
+                                      WHERE co.contact_id = ? ORDER BY co.created_at ASC LIMIT 1),
+                 org_role = (SELECT co.org_role FROM contact_organizations co
+                               WHERE co.contact_id = ? ORDER BY co.created_at ASC LIMIT 1),
+                 updated_at = ?, last_edited_by = ?
+               WHERE id = ? AND customer_id = ? AND organization_id = ?`,
+        params: [contactId, contactId, timestamp, userId, contactId, customerId, orgId],
+      },
+    ]);
     return jsonResponse({ ok: true });
   });
 
@@ -210,17 +254,31 @@ export function register(router: Router): void {
     if (!existing) throw notFound('That organization no longer exists.');
 
     const timestamp = nowIso();
-    // Contacts survive the organization; only the link is cleared so their
-    // cards do not point at a record that is no longer visible.
+    const orgId = ctx.params.id!;
+    // Contacts survive the organization; their membership here is removed and any
+    // whose primary org was this one are repointed to another membership (or none).
     await ctx.db.batch([
       {
         sql: `UPDATE organizations SET deleted_at = ?, updated_at = ?, last_edited_by = ? WHERE id = ? AND customer_id = ?`,
-        params: [timestamp, timestamp, userId, ctx.params.id!, customerId],
+        params: [timestamp, timestamp, userId, orgId, customerId],
       },
       {
-        sql: `UPDATE contacts SET organization_id = NULL, org_role = NULL, updated_at = ?
-                WHERE organization_id = ? AND customer_id = ?`,
-        params: [timestamp, ctx.params.id!, customerId],
+        sql: `UPDATE documents SET deleted_at = ?, deleted_by = ? WHERE organization_id = ? AND deleted_at IS NULL`,
+        params: [timestamp, userId, orgId],
+      },
+      {
+        sql: `DELETE FROM contact_organizations WHERE organization_id = ? AND customer_id = ?`,
+        params: [orgId, customerId],
+      },
+      {
+        sql: `UPDATE contacts SET
+                 organization_id = (SELECT co.organization_id FROM contact_organizations co
+                                      WHERE co.contact_id = contacts.id ORDER BY co.created_at ASC LIMIT 1),
+                 org_role = (SELECT co.org_role FROM contact_organizations co
+                               WHERE co.contact_id = contacts.id ORDER BY co.created_at ASC LIMIT 1),
+                 updated_at = ?
+               WHERE organization_id = ? AND customer_id = ?`,
+        params: [timestamp, orgId, customerId],
       },
     ]);
 

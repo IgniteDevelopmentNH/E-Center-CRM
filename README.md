@@ -212,13 +212,34 @@ the local `node:sqlite` shim) both speak natively -- no translation layer needed
 - Tag lists are JSON in a `TEXT` column, parsed in the mappers.
 
 **Tables:** `customers`, `users`, `sessions`, `user_preferences`, `organizations`, `contacts`,
-`notes`, `tasks`, `events`, `event_attendees`, `documents`, `audit_logs`,
-`microsoft_oauth_credentials`, `calendar_sync_metadata`, `event_external_mapping`.
+`contact_organizations`, `notes`, `note_contacts`, `tasks`, `events`, `event_attendees`, `documents`,
+`audit_logs`, `microsoft_oauth_credentials`, `calendar_sync_metadata`, `event_external_mapping`.
+
+A contact can belong to several organizations (`contact_organizations`) and a note can be filed under
+several contacts or none at all (`note_contacts`); in both cases the junction table is the source of
+truth and the `contacts.organization_id` / `notes.contact_id` columns mirror the **primary** link for
+headline display, sorting and search. Documents can be attached to a contact, an organization **or a
+note** (`documents.note_id`).
 
 Every business table has `created_at`, `updated_at`, `deleted_at`, `created_by` and `last_edited_by`.
 **Nothing is ever hard-deleted**: deletes set `deleted_at`, and every read filters it out. Deleting a
-contact cascades the soft delete to their notes and tasks (one atomic `db.batch()`); deleting an
-organization keeps its people and just clears the link.
+contact cascades the soft delete to their notes (only notes left with no other contact) and tasks (one
+atomic `db.batch()`); deleting an organization keeps its people and just removes the membership.
+
+### Migrations
+
+`schema.sql` is the whole schema for a **fresh** database. Changes to an **existing** production D1
+database ship as dated files in `worker/src/db/migrations/`, applied once, before deploying the
+matching Worker build, e.g.:
+
+```bash
+npx wrangler d1 execute ecenter-crm --remote \
+  --file=./worker/src/db/migrations/2026-09-28-multi-links-and-attachments.sql
+```
+
+That migration adds the `contact_organizations` and `note_contacts` junctions, the `documents.note_id`
+column, backfills both junctions from the existing primary links, and rebuilds `notes` so `contact_id`
+becomes nullable (notes with no contact). It is not needed for a database created from `schema.sql`.
 
 ---
 

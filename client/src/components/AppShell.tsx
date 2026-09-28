@@ -31,15 +31,10 @@ export function AppShell({ children }: { children: ReactNode }) {
           <Link to="/" className="flex shrink-0 items-center gap-3" aria-label="UNH ECenter CRM home">
             <img src="/unh-logo.svg" alt="University of New Hampshire" className="h-8 w-auto sm:h-9" />
             <span className="hidden h-8 w-px bg-white/25 sm:block" aria-hidden="true" />
-            <span className="hidden sm:block">
-              <span className="block text-sm font-bold leading-tight">ECenter CRM</span>
-              <span className="block text-[11px] leading-tight text-navy-100">
-                One place to nurture your entrepreneurial network
-              </span>
-            </span>
+            <span className="hidden text-xl font-bold leading-tight sm:block">ECenter CRM</span>
           </Link>
 
-          <div className="order-3 w-full sm:order-none sm:ml-auto sm:w-auto sm:max-w-md sm:flex-1">
+          <div className="order-3 w-full sm:order-none sm:mx-4 sm:w-auto sm:flex-1">
             <GlobalSearch />
           </div>
 

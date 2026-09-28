@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { EventForm } from '../components/forms.tsx';
 import { ConfirmDialog, Modal, SlideOver } from '../components/overlays.tsx';
+import { useEscapeKey } from '../lib/hooks.ts';
 import {
   Avatar,
   Chip,
@@ -160,9 +161,11 @@ export function EventsPage() {
             >
               ‹
             </button>
-            <span className="min-w-[9.5rem] text-center text-sm font-bold text-navy-800">
-              {MONTH_NAMES[cursor.month]} {cursor.year}
-            </span>
+            <MonthYearPicker
+              year={cursor.year}
+              month={cursor.month}
+              onChange={(year, month) => setCursor({ year, month })}
+            />
             <button
               type="button"
               className="btn-ghost min-h-[36px] px-3"
@@ -320,6 +323,103 @@ export function EventsPage() {
       </Modal>
 
       {openId && <EventPanel eventId={openId} onClose={() => setOpenId(null)} onChanged={reload} />}
+    </div>
+  );
+}
+
+/** The calendar's month/year label, clickable to jump to any month and year. */
+function MonthYearPicker({
+  year,
+  month,
+  onChange,
+}: {
+  year: number;
+  month: number;
+  onChange: (year: number, month: number) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const yearListRef = useRef<HTMLDivElement>(null);
+  const currentYear = new Date().getFullYear();
+  // A generous, scrollable range on either side of both the current and the viewed year.
+  const minYear = Math.min(year, currentYear) - 12;
+  const maxYear = Math.max(year, currentYear) + 12;
+  const years = Array.from({ length: maxYear - minYear + 1 }, (_, i) => minYear + i);
+
+  useEscapeKey(() => setOpen(false), open);
+
+  // Bring the selected year into view each time the panel opens.
+  useEffect(() => {
+    if (!open) return;
+    const node = yearListRef.current?.querySelector('[data-selected="true"]');
+    node?.scrollIntoView({ block: 'center' });
+  }, [open]);
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        className="min-h-[36px] min-w-[9.5rem] rounded-md px-2 text-center text-sm font-bold text-navy-800 transition hover:bg-slate-100"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+      >
+        {MONTH_NAMES[month]} {year}
+        <span className="ml-1 text-xs text-slate-400" aria-hidden="true">
+          ▾
+        </span>
+      </button>
+
+      {open && (
+        <>
+          <button
+            type="button"
+            className="fixed inset-0 z-20 cursor-default"
+            onClick={() => setOpen(false)}
+            aria-label="Close month picker"
+          />
+          <div className="absolute left-1/2 z-30 mt-1 flex w-64 -translate-x-1/2 gap-2 rounded-lg border border-slate-200 bg-white p-2 shadow-raised">
+            <div className="max-h-64 flex-1 overflow-y-auto pr-1">
+              {MONTH_NAMES.map((name, index) => (
+                <button
+                  key={name}
+                  type="button"
+                  onClick={() => {
+                    onChange(year, index);
+                    setOpen(false);
+                  }}
+                  className={`block w-full rounded-md px-3 py-1.5 text-left text-sm transition ${
+                    index === month
+                      ? 'bg-navy font-semibold text-white'
+                      : 'text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  {name}
+                </button>
+              ))}
+            </div>
+            <div ref={yearListRef} className="max-h-64 w-20 overflow-y-auto border-l border-slate-100 pl-2">
+              {years.map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  data-selected={value === year}
+                  onClick={() => {
+                    onChange(value, month);
+                    setOpen(false);
+                  }}
+                  className={`block w-full rounded-md px-2 py-1.5 text-center text-sm transition ${
+                    value === year
+                      ? 'bg-navy font-semibold text-white'
+                      : 'text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  {value}
+                </button>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
