@@ -82,6 +82,14 @@ export async function revokeAllSessionsForUser(db: Db, userId: string): Promise<
   await db.run(`DELETE FROM sessions WHERE user_id = ?`, [userId]);
 }
 
+/** Ends every session for a user except the one presented by `keepToken`. */
+export async function revokeOtherSessions(db: Db, userId: string, keepToken: string): Promise<void> {
+  await db.run(`DELETE FROM sessions WHERE user_id = ? AND token_hash <> ?`, [
+    userId,
+    await hashToken(keepToken),
+  ]);
+}
+
 /** Opportunistic cleanup; safe to call occasionally, never required for correctness. */
 export async function purgeExpiredSessions(db: Db): Promise<void> {
   await db.run(`DELETE FROM sessions WHERE expires_at <= ?`, [nowIso()]);

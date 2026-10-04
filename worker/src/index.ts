@@ -33,39 +33,64 @@ router
   .use(registerCalendar)
   .use(registerBootstrap);
 
-function corsHeaders(origin: string | null): Record<string, string> {
+/**
+ * Headers added to every response the Worker produces. Static files served
+ * straight from the assets binding bypass the Worker, so the same set lives in
+ * client/public/_headers for those.
+ */
+const SECURITY_HEADERS: Record<string, string> = {
+  'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
+  'X-Content-Type-Options': 'nosniff',
+  'X-Frame-Options': 'DENY',
+  'Referrer-Policy': 'same-origin',
+  'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=()',
+  'Cross-Origin-Opener-Policy': 'same-origin',
+  'Content-Security-Policy':
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; " +
+    "font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'",
+};
+
+/**
+ * The SPA is served by this same Worker, so browsers never need CORS in
+ * production. Only the app's own origin (and APP_URL, if set) is echoed back;
+ * any other origin gets no CORS headers and the browser blocks the read.
+ */
+function corsHeaders(origin: string | null, allowed: string[]): Record<string, string> {
+  if (!origin || !allowed.includes(origin)) return { Vary: 'Origin' };
   return {
-    'Access-Control-Allow-Origin': origin ?? '*',
+    'Access-Control-Allow-Origin': origin,
     'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
     'Access-Control-Allow-Headers': 'Authorization, Content-Type',
-    'Access-Control-Allow-Credentials': 'true',
     Vary: 'Origin',
   };
 }
 
-function withCors(response: Response, origin: string | null): Response {
+function finalize(response: Response, origin: string | null, allowed: string[], isApi: boolean): Response {
   const headers = new Headers(response.headers);
-  for (const [key, value] of Object.entries(corsHeaders(origin))) headers.set(key, value);
-  return new Response(response.body, { status: response.status, headers });
+  for (const [key, value] of Object.entries(SECURITY_HEADERS)) headers.set(key, value);
+  if (isApi) headers.set('Cache-Control', 'no-store');
+  for (const [key, value] of Object.entries(corsHeaders(origin, allowed))) headers.set(key, value);
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
     const origin = req.headers.get('Origin');
+    const allowed = [url.origin, ...(env.APP_URL ? [new URL(env.APP_URL).origin] : [])];
 
     if (req.method === 'OPTIONS') {
-      return new Response(null, { status: 204, headers: corsHeaders(origin) });
+      return finalize(new Response(null, { status: 204 }), origin, allowed, true);
     }
 
     // Requests outside /api/* are the built React app: static files, or the
     // SPA's index.html fallback for a client-side route like /contacts.
     if (!url.pathname.startsWith('/api/')) {
-      return env.ASSETS.fetch(req);
+      return finalize(await env.ASSETS.fetch(req), origin, allowed, false);
     }
 
     if (url.pathname === '/api/health') {
-      return withCors(jsonResponse({ ok: true, database: 'd1', storage: 'r2' }), origin);
+      return finalize(jsonResponse({ ok: true, database: 'd1', storage: 'r2' }), origin, allowed, true);
     }
 
     try {
@@ -101,14 +126,14 @@ export default {
 
       const matched = router.match(ctx.method, ctx.pathname);
       if (!matched) {
-        return withCors(jsonResponse({ error: 'Endpoint not found.' }, { status: 404 }), origin);
+        return finalize(jsonResponse({ error: 'Endpoint not found.' }, { status: 404 }), origin, allowed, true);
       }
       ctx.params = matched.params;
 
       const response = await matched.handler(ctx);
-      return withCors(response, origin);
+      return finalize(response, origin, allowed, true);
     } catch (error) {
-      return withCors(errorToResponse(error, true), origin);
+      return finalize(errorToResponse(error, true), origin, allowed, true);
     }
   },
 };

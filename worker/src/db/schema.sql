@@ -274,3 +274,14 @@ CREATE TABLE IF NOT EXISTS event_external_mapping (
   UNIQUE (customer_id, external_id)
 );
 CREATE INDEX IF NOT EXISTS idx_extmap_event ON event_external_mapping(event_id);
+
+-- Failed-sign-in counters for brute-force protection (see lib/throttle.ts).
+-- One row per key ("email:<address>" or "ip:<address>"); a successful sign-in
+-- clears the email row. Keyed by the *attempted* address whether or not the
+-- account exists, so lockouts reveal nothing about who has an account.
+CREATE TABLE IF NOT EXISTS login_throttle (
+  key              TEXT PRIMARY KEY,
+  failures         INTEGER NOT NULL DEFAULT 0,
+  window_started_at TEXT NOT NULL,
+  locked_until     TEXT
+);

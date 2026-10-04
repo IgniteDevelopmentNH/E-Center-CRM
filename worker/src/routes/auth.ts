@@ -1,7 +1,8 @@
 import { audit } from '../lib/audit.ts';
-import { badRequest, jsonResponse, readJson, unauthorized } from '../lib/http.ts';
+import { badRequest, clientIp, jsonResponse, readJson, unauthorized } from '../lib/http.ts';
 import { hashPassword, verifyPassword } from '../lib/password.ts';
-import { createSession, revokeSession } from '../lib/session.ts';
+import { createSession, revokeOtherSessions, revokeSession } from '../lib/session.ts';
+import { assertNotLocked, clearFailures, recordFailure, throttleKeys } from '../lib/throttle.ts';
 import { nowIso } from '../lib/time.ts';
 import { requiredEmail, requiredString } from '../lib/validate.ts';
 import { requireAuth } from '../middleware/auth.ts';
@@ -16,12 +17,19 @@ interface UserRow {
   role: string;
 }
 
+// Valid-format hash of a random password; only ever compared against, to equalise timing.
+const DUMMY_HASH =
+  'pbkdf2:100000:00112233445566778899aabbccddeeff:0000000000000000000000000000000000000000000000000000000000000000';
+
 export function register(router: Router): void {
   router.post('/api/auth/login', async (ctx: Ctx) => {
     const body = await readJson(ctx.req);
     const email = requiredEmail(body.email);
     const password = requiredString(body.password, 'Password', { max: 200 });
     const remember = body.remember === true;
+
+    const keys = throttleKeys(email, clientIp(ctx.req));
+    await assertNotLocked(ctx.db, keys);
 
     const user = await ctx.db.get<UserRow>(
       `SELECT id, customer_id, email, password_hash, name, role
@@ -30,8 +38,11 @@ export function register(router: Router): void {
     );
 
     // Same generic message either way, so the response cannot be used to
-    // enumerate which addresses have accounts.
-    if (!user || !(await verifyPassword(password, user.password_hash))) {
+    // enumerate which addresses have accounts. When the account does not
+    // exist we still run a full hash so response time does not give it away.
+    const passwordOk = await verifyPassword(password, user?.password_hash ?? DUMMY_HASH);
+    if (!user || !passwordOk) {
+      await recordFailure(ctx.db, keys);
       if (user) {
         await audit(ctx.db, {
           customerId: user.customer_id,
@@ -43,6 +54,7 @@ export function register(router: Router): void {
       throw unauthorized('That email and password do not match.');
     }
 
+    await clearFailures(ctx.db, email);
     await ctx.db.run(`UPDATE users SET last_login_at = ? WHERE id = ?`, [nowIso(), user.id]);
     await audit(ctx.db, { customerId: user.customer_id, userId: user.id, action: 'auth.login', req: ctx.req });
 
@@ -89,7 +101,7 @@ export function register(router: Router): void {
     const body = await readJson(ctx.req);
     const current = requiredString(body.currentPassword, 'Current password', { max: 200 });
     const next = requiredString(body.newPassword, 'New password', { max: 200 });
-    if (next.length < 8) throw badRequest('New password must be at least 8 characters.', 'New password');
+    if (next.length < 10) throw badRequest('New password must be at least 10 characters.', 'New password');
 
     const user = await ctx.db.get<{ id: string; password_hash: string }>(
       `SELECT id, password_hash FROM users WHERE id = ?`,
@@ -104,6 +116,9 @@ export function register(router: Router): void {
       nowIso(),
       auth.userId,
     ]);
+    // A changed password should end every other signed-in session (e.g. a
+    // stolen or forgotten device) while keeping this one.
+    if (ctx.token) await revokeOtherSessions(ctx.db, auth.userId, ctx.token);
     await audit(ctx.db, {
       customerId: auth.customerId,
       userId: auth.userId,
