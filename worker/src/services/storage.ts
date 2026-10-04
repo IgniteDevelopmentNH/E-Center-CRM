@@ -1,4 +1,5 @@
 import type { R2Bucket } from '@cloudflare/workers-types';
+import { decryptBytes, encryptBytes, isEncryptedFile } from '../lib/crypto.ts';
 
 /**
  * Document storage via the R2 binding (`DOCS` in wrangler.toml). No S3 SDK, no
@@ -49,24 +50,43 @@ export function buildStorageKey(customerId: string, fileName: string): string {
   return `customers/${customerId}/documents/${Date.now()}-${safeFileName(fileName)}`;
 }
 
+/** Encrypts the bytes (AES-256-GCM) before they reach the bucket. */
 export async function putObject(
   bucket: R2Bucket,
   key: string,
   body: ArrayBuffer,
   contentType: string,
+  secretKey: string,
 ): Promise<void> {
-  await bucket.put(key, body, { httpMetadata: { contentType } });
+  await bucket.put(key, await encryptBytes(body, secretKey), { httpMetadata: { contentType } });
 }
 
-export async function getObject(bucket: R2Bucket, key: string): Promise<ArrayBuffer> {
+/**
+ * Reads and decrypts a stored file. A file written before encryption was
+ * introduced is returned as-is and re-saved encrypted in place, so older
+ * documents convert themselves the first time they are opened.
+ */
+export async function readObject(
+  bucket: R2Bucket,
+  key: string,
+  secretKey: string,
+): Promise<{ body: ArrayBuffer; contentType: string | null }> {
   const object = await bucket.get(key);
   if (!object) throw new Error('That file could not be read from storage.');
-  return object.arrayBuffer();
-}
-
-export async function getObjectType(bucket: R2Bucket, key: string): Promise<string | null> {
-  const object = await bucket.get(key);
-  return object?.httpMetadata?.contentType ?? null;
+  const contentType = object.httpMetadata?.contentType ?? null;
+  const raw = new Uint8Array(await object.arrayBuffer());
+  if (isEncryptedFile(raw)) {
+    return { body: await decryptBytes(raw, secretKey), contentType };
+  }
+  const plain = raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength) as ArrayBuffer;
+  try {
+    await bucket.put(key, await encryptBytes(plain, secretKey), {
+      httpMetadata: { contentType: contentType ?? 'application/octet-stream' },
+    });
+  } catch (error) {
+    console.error('[storage] could not encrypt legacy file in place', error);
+  }
+  return { body: plain, contentType };
 }
 
 export async function deleteObject(bucket: R2Bucket, key: string): Promise<void> {

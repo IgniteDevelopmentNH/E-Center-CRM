@@ -67,3 +67,37 @@ export async function decryptOptional(
     return null;
   }
 }
+
+/**
+ * Whole-file encryption for stored documents. Layout: MAGIC (8 bytes) | IV (12) | AES-GCM ciphertext+tag.
+ * The key is derived from the master secret with a purpose label, so it is
+ * distinct from the key used for OAuth tokens even though both come from
+ * ENCRYPTION_KEY. The magic prefix lets reads tell encrypted files from any
+ * older plaintext ones.
+ */
+const FILE_MAGIC = new Uint8Array([0x00, 0x45, 0x43, 0x44, 0x4f, 0x43, 0x01, 0x00]); // NUL "ECDOC" 0x01 NUL
+
+export function isEncryptedFile(data: Uint8Array): boolean {
+  return data.length > FILE_MAGIC.length + 12 && FILE_MAGIC.every((byte, i) => data[i] === byte);
+}
+
+export async function encryptBytes(plain: ArrayBuffer, secretKey: string): Promise<Uint8Array> {
+  const key = await importKey(`ecenter-documents-v1:${secretKey}`);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, plain);
+  const out = new Uint8Array(FILE_MAGIC.length + iv.length + ciphertext.byteLength);
+  out.set(FILE_MAGIC, 0);
+  out.set(iv, FILE_MAGIC.length);
+  out.set(new Uint8Array(ciphertext), FILE_MAGIC.length + iv.length);
+  return out;
+}
+
+export async function decryptBytes(data: Uint8Array, secretKey: string): Promise<ArrayBuffer> {
+  const key = await importKey(`ecenter-documents-v1:${secretKey}`);
+  const ivStart = FILE_MAGIC.length;
+  return crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv: data.slice(ivStart, ivStart + 12) },
+    key,
+    data.slice(ivStart + 12),
+  );
+}

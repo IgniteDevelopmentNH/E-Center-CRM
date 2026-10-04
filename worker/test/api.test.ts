@@ -506,6 +506,39 @@ describe('documents', () => {
     assert.ok(logs.body.logs.some((l: any) => l.action === 'document.download'));
   });
 
+  async function storedBytes(): Promise<string> {
+    const row = fakeD1._raw.prepare('SELECT storage_key FROM documents WHERE id = ?').get(documentId);
+    const object = await env.DOCS.get(row.storage_key);
+    return Buffer.from(await object.arrayBuffer()).toString('latin1');
+  }
+
+  async function downloadText(): Promise<string> {
+    const link = await api('GET', `/api/documents/${documentId}/download`);
+    const res = await worker.fetch(
+      new Request(`http://localhost${link.body.url}`, { headers: { Authorization: `Bearer ${token}` } }),
+      env as never,
+    );
+    return res.text();
+  }
+
+  it('stores the file encrypted, never as plain text', async () => {
+    const stored = await storedBytes();
+    assert.ok(!stored.includes('engagement letter'));
+    assert.ok(stored.startsWith(' ECDOC'));
+  });
+
+  it('encrypts an older plaintext file in place the first time it is opened', async () => {
+    const row = fakeD1._raw.prepare('SELECT storage_key FROM documents WHERE id = ?').get(documentId);
+    await env.DOCS.put(row.storage_key, Buffer.from('engagement letter'), {
+      httpMetadata: { contentType: 'text/plain' },
+    });
+    assert.equal(await storedBytes(), 'engagement letter');
+
+    assert.equal(await downloadText(), 'engagement letter');
+    assert.ok(!(await storedBytes()).includes('engagement letter'));
+    assert.equal(await downloadText(), 'engagement letter');
+  });
+
   it('soft-deletes and stops serving the document', async () => {
     assert.equal((await api('DELETE', `/api/documents/${documentId}`)).status, 200);
     assert.equal((await api('GET', `/api/documents/${documentId}/download`)).status, 404);

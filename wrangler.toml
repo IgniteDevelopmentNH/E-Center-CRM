@@ -50,7 +50,7 @@ JWT_TTL_REMEMBER_SECONDS = "2592000"
 
 # Secrets (never in this file — set with `wrangler secret put NAME`):
 #   JWT_SECRET            openssl rand -hex 32
-#   ENCRYPTION_KEY         openssl rand -hex 32   (AES-256-GCM for OAuth secrets/tokens)
+#   ENCRYPTION_KEY         openssl rand -hex 32   (AES-256-GCM for OAuth tokens AND uploaded documents -- never change or lose it)
 #   MICROSOFT_REDIRECT_URI  https://<your-worker-domain>/api/calendar/microsoft/callback
 #   (Microsoft app registration client id/secret are entered per-tenant in
 #    Settings -> Outlook calendar in the app itself, encrypted into D1 — not a
