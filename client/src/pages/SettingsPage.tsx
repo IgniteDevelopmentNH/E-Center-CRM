@@ -302,7 +302,7 @@ function MemberForm({
           <Field
             label="Temporary password"
             required
-            hint="At least 8 characters. They can change it after signing in."
+            hint="At least 10 characters. They can change it after signing in."
             error={errorFor('Temporary password')}
           >
             <TextInput

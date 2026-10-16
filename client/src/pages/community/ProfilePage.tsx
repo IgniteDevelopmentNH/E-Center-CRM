@@ -188,7 +188,7 @@ function AccountSettings({ community }: { community: CommunityState }) {
           <Field label="Current password" error={pwErrors.errorFor('Current password')}>
             <TextInput type="password" value={current} onChange={(e) => setCurrent(e.target.value)} autoComplete="current-password" />
           </Field>
-          <Field label="New password" error={pwErrors.errorFor('New password')} hint="At least 8 characters.">
+          <Field label="New password" error={pwErrors.errorFor('New password')} hint="At least 10 characters.">
             <TextInput type="password" value={next} onChange={(e) => setNext(e.target.value)} autoComplete="new-password" />
           </Field>
         </div>

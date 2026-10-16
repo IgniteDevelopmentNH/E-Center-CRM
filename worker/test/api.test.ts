@@ -116,6 +116,85 @@ describe('authentication', () => {
     assert.equal((await api('POST', '/api/auth/logout', undefined, bellaToken)).status, 200);
     assert.equal((await api('GET', '/api/contacts', undefined, bellaToken)).status, 401);
   });
+
+  it('locks sign-in after repeated failures, even for an address with no account', async () => {
+    const attempt = (email: string, password: string) =>
+      api('POST', '/api/auth/login', { email, password }, null);
+    for (let i = 0; i < 5; i++) {
+      assert.equal((await attempt('ghost@unh.edu', 'wrong-password')).status, 401);
+    }
+    const locked = await attempt('ghost@unh.edu', 'wrong-password');
+    assert.equal(locked.status, 429);
+    assert.match(locked.body.error, /Too many/);
+
+    // The lock is per address: other accounts are unaffected.
+    assert.equal((await attempt('lisa@unh.edu', 'test123')).status, 200);
+  });
+
+  it('clears the failure count after a successful sign-in', async () => {
+    const attempt = (password: string) =>
+      api('POST', '/api/auth/login', { email: 'bella@unh.edu', password }, null);
+    for (let i = 0; i < 4; i++) await attempt('wrong');
+    assert.equal((await attempt('test123')).status, 200);
+    for (let i = 0; i < 4; i++) assert.equal((await attempt('wrong')).status, 401);
+  });
+
+  it('ends other sessions when the password is changed', async () => {
+    const login = (password: string) =>
+      api('POST', '/api/auth/login', { email: 'temp.pw@unh.edu', password }, null);
+    const create = await api('POST', '/api/settings/users', {
+      name: 'Temp Pw',
+      email: 'temp.pw@unh.edu',
+      role: 'editor',
+      password: 'first-password-1',
+    });
+    assert.equal(create.status, 201);
+    const a = (await login('first-password-1')).body.token;
+    const b = (await login('first-password-1')).body.token;
+    const change = await api('POST', '/api/auth/change-password', {
+      currentPassword: 'first-password-1',
+      newPassword: 'second-password-2',
+    }, a);
+    assert.equal(change.status, 200);
+    assert.equal((await api('GET', '/api/auth/me', undefined, a)).status, 200);
+    assert.equal((await api('GET', '/api/auth/me', undefined, b)).status, 401);
+    await api('DELETE', `/api/settings/users/${create.body.user.id}`);
+  });
+
+  it('rejects a new password shorter than 10 characters', async () => {
+    const response = await api('POST', '/api/auth/change-password', {
+      currentPassword: 'test123',
+      newPassword: 'short',
+    });
+    assert.equal(response.status, 400);
+  });
+});
+
+describe('response hardening', () => {
+  async function raw(method: string, routePath: string, headers: Record<string, string> = {}) {
+    return worker.fetch(new Request(`http://localhost${routePath}`, { method, headers }), env as never);
+  }
+
+  it('sends security headers and disables caching on API responses', async () => {
+    const response = await raw('GET', '/api/health');
+    assert.match(response.headers.get('Strict-Transport-Security') ?? '', /max-age=/);
+    assert.equal(response.headers.get('X-Content-Type-Options'), 'nosniff');
+    assert.equal(response.headers.get('X-Frame-Options'), 'DENY');
+    assert.match(response.headers.get('Content-Security-Policy') ?? '', /frame-ancestors 'none'/);
+    assert.equal(response.headers.get('Cache-Control'), 'no-store');
+  });
+
+  it('adds the same headers to static assets', async () => {
+    const response = await raw('GET', '/');
+    assert.equal(response.headers.get('X-Frame-Options'), 'DENY');
+  });
+
+  it('does not grant cross-origin access to unknown origins', async () => {
+    const foreign = await raw('GET', '/api/health', { Origin: 'https://evil.example' });
+    assert.equal(foreign.headers.get('Access-Control-Allow-Origin'), null);
+    const own = await raw('GET', '/api/health', { Origin: 'http://localhost' });
+    assert.equal(own.headers.get('Access-Control-Allow-Origin'), 'http://localhost');
+  });
 });
 
 describe('contacts', () => {
@@ -425,6 +504,39 @@ describe('documents', () => {
 
     const logs = await api('GET', '/api/settings/audit-logs');
     assert.ok(logs.body.logs.some((l: any) => l.action === 'document.download'));
+  });
+
+  async function storedBytes(): Promise<string> {
+    const row = fakeD1._raw.prepare('SELECT storage_key FROM documents WHERE id = ?').get(documentId);
+    const object = await env.DOCS.get(row.storage_key);
+    return Buffer.from(await object.arrayBuffer()).toString('latin1');
+  }
+
+  async function downloadText(): Promise<string> {
+    const link = await api('GET', `/api/documents/${documentId}/download`);
+    const res = await worker.fetch(
+      new Request(`http://localhost${link.body.url}`, { headers: { Authorization: `Bearer ${token}` } }),
+      env as never,
+    );
+    return res.text();
+  }
+
+  it('stores the file encrypted, never as plain text', async () => {
+    const stored = await storedBytes();
+    assert.ok(!stored.includes('engagement letter'));
+    assert.ok(stored.startsWith(' ECDOC'));
+  });
+
+  it('encrypts an older plaintext file in place the first time it is opened', async () => {
+    const row = fakeD1._raw.prepare('SELECT storage_key FROM documents WHERE id = ?').get(documentId);
+    await env.DOCS.put(row.storage_key, Buffer.from('engagement letter'), {
+      httpMetadata: { contentType: 'text/plain' },
+    });
+    assert.equal(await storedBytes(), 'engagement letter');
+
+    assert.equal(await downloadText(), 'engagement letter');
+    assert.ok(!(await storedBytes()).includes('engagement letter'));
+    assert.equal(await downloadText(), 'engagement letter');
   });
 
   it('soft-deletes and stops serving the document', async () => {

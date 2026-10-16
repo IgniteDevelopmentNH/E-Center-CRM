@@ -3,11 +3,13 @@
 export class HttpError extends Error {
   status: number;
   field?: string;
+  headers?: Record<string, string>;
 
-  constructor(status: number, message: string, field?: string) {
+  constructor(status: number, message: string, field?: string, headers?: Record<string, string>) {
     super(message);
     this.status = status;
     this.field = field;
+    this.headers = headers;
   }
 }
 
@@ -34,7 +36,10 @@ export function jsonResponse(data: unknown, init: ResponseInit = {}): Response {
 /** Converts any thrown value into the single JSON error shape `{ error, field? }`. */
 export function errorToResponse(error: unknown, isProd: boolean): Response {
   if (error instanceof HttpError) {
-    return jsonResponse({ error: error.message, field: error.field }, { status: error.status });
+    return jsonResponse({ error: error.message, field: error.field }, {
+      status: error.status,
+      headers: error.headers,
+    });
   }
   console.error('[error]', error);
   return jsonResponse(

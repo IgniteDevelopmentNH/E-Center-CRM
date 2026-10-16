@@ -102,6 +102,6 @@ export async function storeCommunityUpload(
   const fileName = safeFileName(file.name);
   const folder = input.purpose === 'resume' ? 'resumes' : input.purpose === 'photo' ? 'photos' : 'posts';
   const key = `customers/${input.customerId}/community/${folder}/${input.ownerId}/${Date.now()}${extension}`;
-  await putObject(ctx.env.DOCS, key, body, file.type);
+  await putObject(ctx.env.DOCS, key, body, file.type, ctx.config.encryptionKey);
   return { key, fileName, type: file.type, size: file.size };
 }

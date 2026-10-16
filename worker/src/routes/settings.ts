@@ -36,8 +36,8 @@ export function register(router: Router): void {
     const name = requiredString(body.name, 'Name', { max: 120 });
     const role = oneOf(body.role, 'Role', USER_ROLES, 'editor');
     const password = requiredString(body.password, 'Temporary password', { max: 200 });
-    if (password.length < 8) {
-      throw badRequest('The temporary password must be at least 8 characters.', 'Temporary password');
+    if (password.length < 10) {
+      throw badRequest('The temporary password must be at least 10 characters.', 'Temporary password');
     }
 
     const clash = await ctx.db.get(`SELECT id FROM users WHERE LOWER(email) = ?`, [email]);

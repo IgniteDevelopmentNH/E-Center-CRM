@@ -8,7 +8,7 @@ import { requireCommunityViewer } from '../middleware/auth.ts';
 import type { Ctx, Router } from '../router.ts';
 import { PUBLIC_PROFILE_COLUMNS, loadTags, publicMemberOut } from '../services/community.ts';
 import { recommendMentors } from '../services/matching.ts';
-import { getObject } from '../services/storage.ts';
+import { readObject } from '../services/storage.ts';
 
 /**
  * Read-only community content. Every route here requires an ACTIVE community
@@ -263,7 +263,8 @@ export function register(router: Router): void {
       [ctx.params.userId!],
     );
     if (!row?.photo_key) throw notFound();
-    return fileResponse(await getObject(ctx.env.DOCS, row.photo_key), row.photo_type ?? 'image/jpeg', 'inline');
+    const stored = await readObject(ctx.env.DOCS, row.photo_key, ctx.config.encryptionKey);
+    return fileResponse(stored.body, stored.contentType ?? row.photo_type ?? 'image/jpeg', 'inline');
   });
 
   router.get('/api/community/files/post-image/:postId', async (ctx: Ctx) => {
@@ -275,7 +276,8 @@ export function register(router: Router): void {
     );
     // A community-scoped link stops working the moment a post is unpublished.
     if (!row?.image_key || (payload.s !== 'staff' && row.status !== 'published')) throw notFound();
-    return fileResponse(await getObject(ctx.env.DOCS, row.image_key), row.image_type ?? 'image/jpeg', 'inline');
+    const stored = await readObject(ctx.env.DOCS, row.image_key, ctx.config.encryptionKey);
+    return fileResponse(stored.body, stored.contentType ?? row.image_type ?? 'image/jpeg', 'inline');
   });
 
   /** Resume links are only ever issued to the owner or to staff (see communityAccount / adminCommunity). */
@@ -297,9 +299,10 @@ export function register(router: Router): void {
         req: ctx.req,
       });
     }
+    const stored = await readObject(ctx.env.DOCS, row.resume_key, ctx.config.encryptionKey);
     return fileResponse(
-      await getObject(ctx.env.DOCS, row.resume_key),
-      row.resume_type ?? 'application/octet-stream',
+      stored.body,
+      stored.contentType ?? row.resume_type ?? 'application/octet-stream',
       `attachment; filename="${(row.resume_name ?? 'resume').replace(/[^A-Za-z0-9._-]/g, '_')}"`,
     );
   });

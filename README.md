@@ -736,9 +736,11 @@ Without seeding, the local database has no users.
 **Port already in use**
 Set `PORT` in `.env` for the Worker dev server, or run `npm run dev:web -- --port 5174` for Vite.
 
-**Changing `ENCRYPTION_KEY` breaks the Outlook connection**
-Stored tokens cannot be decrypted with a new key. Reconnect Outlook in Settings; no other data is
-affected.
+**Never change or lose `ENCRYPTION_KEY`**
+It encrypts the Outlook tokens *and every uploaded document* (AES-256-GCM, with a separate key derived
+for documents). A new key makes Outlook need reconnecting and makes **existing documents permanently
+unreadable**. Keep a copy of the key in a password manager. Documents uploaded before encryption was
+added are encrypted automatically the first time they are opened.
 
 **Sync says "Connect your Outlook calendar first"**
 The app registration is saved but consent has not been granted. Click **Connect Outlook** and

@@ -10,10 +10,9 @@ import type { Ctx, Router } from '../router.ts';
 import {
   buildStorageKey,
   deleteObject,
-  getObject,
-  getObjectType,
   isAllowedFile,
   putObject,
+  readObject,
   safeFileName,
 } from '../services/storage.ts';
 
@@ -104,7 +103,7 @@ export function register(router: Router): void {
 
     const fileName = safeFileName(file.name);
     const storageKey = buildStorageKey(customerId, fileName);
-    await putObject(ctx.env.DOCS, storageKey, await file.arrayBuffer(), file.type);
+    await putObject(ctx.env.DOCS, storageKey, await file.arrayBuffer(), file.type, ctx.config.encryptionKey);
 
     const id = newId();
     await ctx.db.run(
@@ -199,11 +198,10 @@ export function register(router: Router): void {
     );
     if (!document_) throw notFound('That document no longer exists.');
 
-    const body = await getObject(ctx.env.DOCS, document_.storage_key);
-    const contentType = (await getObjectType(ctx.env.DOCS, document_.storage_key)) ?? document_.file_type;
-    return new Response(body, {
+    const stored = await readObject(ctx.env.DOCS, document_.storage_key, ctx.config.encryptionKey);
+    return new Response(stored.body, {
       headers: {
-        'Content-Type': contentType,
+        'Content-Type': stored.contentType ?? document_.file_type,
         'Content-Disposition': `attachment; filename="${safeFileName(document_.file_name)}"`,
       },
     });
