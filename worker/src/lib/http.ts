@@ -15,6 +15,15 @@ export const badRequest = (message: string, field?: string) => new HttpError(400
 export const unauthorized = (message = 'Sign in to continue.') => new HttpError(401, message);
 export const forbidden = (message = 'You do not have access to this.') => new HttpError(403, message);
 export const notFound = (message = 'Not found.') => new HttpError(404, message);
+export const conflict = (message: string, field?: string) => new HttpError(409, message, field);
+export const tooManyRequests = (message = 'Too many requests. Please wait a moment and try again.') =>
+  new HttpError(429, message);
+
+/** True for a SQLite/D1 UNIQUE or PRIMARY KEY constraint failure. */
+export function isUniqueViolation(error: unknown): boolean {
+  const message = String((error as Error)?.message ?? error);
+  return /UNIQUE constraint failed|PRIMARY KEY constraint|SQLITE_CONSTRAINT/i.test(message);
+}
 
 export function jsonResponse(data: unknown, init: ResponseInit = {}): Response {
   const headers = new Headers(init.headers);

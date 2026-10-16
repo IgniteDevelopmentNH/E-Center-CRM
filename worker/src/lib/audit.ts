@@ -21,7 +21,27 @@ export type AuditAction =
   | 'export.csv'
   | 'user.create'
   | 'user.update'
-  | 'user.delete';
+  | 'user.delete'
+  | 'auth.password_reset_requested'
+  | 'auth.password_reset'
+  | 'community.signup'
+  | 'community.email_verified'
+  | 'community.email_change_requested'
+  | 'community.email_changed'
+  | 'community.activated'
+  | 'community.linked'
+  | 'community.link_conflict'
+  | 'community.link_failed'
+  | 'community.unlinked'
+  | 'community.deactivated'
+  | 'community.reactivated'
+  | 'community.staff_identity_created'
+  | 'community.resume_download'
+  | 'post.create'
+  | 'post.update'
+  | 'post.publish'
+  | 'post.unpublish'
+  | 'post.archive';
 
 interface AuditInput {
   customerId: string;

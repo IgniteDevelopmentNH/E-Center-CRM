@@ -101,8 +101,13 @@ export const api = {
 /** Fetches a short-lived signed URL for a stored document and opens it in a new tab. */
 export async function openDocument(documentId: string): Promise<void> {
   const response = await api.get<{ url: string }>(`/documents/${documentId}/download`);
+  openSignedUrl(response.url);
+}
+
+/** Opens a short-lived signed download URL in a new tab (a link click, so pop-up blockers allow it). */
+export function openSignedUrl(url: string): void {
   const link = document.createElement('a');
-  link.href = response.url;
+  link.href = url;
   link.rel = 'noopener';
   link.target = '_blank';
   document.body.append(link);

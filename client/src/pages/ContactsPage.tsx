@@ -4,6 +4,7 @@ import { ContactPanel } from './ContactPanel.tsx';
 import { ContactForm } from '../components/forms.tsx';
 import { Modal } from '../components/overlays.tsx';
 import {
+  ACCOUNT_STATUS_TONES,
   Avatar,
   CONTACT_STATUS_TONES,
   Chip,
@@ -19,7 +20,7 @@ import {
 } from '../components/ui.tsx';
 import { buildQuery, downloadCsv } from '../lib/api.ts';
 import { CONTACT_STATUSES, CONTACT_TAGS } from '../lib/constants.ts';
-import { formatRelative, truncate } from '../lib/format.ts';
+import { formatRelative, humanise, truncate } from '../lib/format.ts';
 import { useApi, useDebounced } from '../lib/hooks.ts';
 import type { Contact, ContactsResponse, OrganizationsResponse } from '../lib/types.ts';
 import { useAuth } from '../state/AuthContext.tsx';
@@ -44,6 +45,7 @@ export function ContactsPage() {
   const [status, setStatus] = useState('all');
   const [tag, setTag] = useState('all');
   const [organizationId, setOrganizationId] = useState('all');
+  const [accountStatus, setAccountStatus] = useState('all');
   const [sort, setSort] = useState('name');
   const [interactionFrom, setInteractionFrom] = useState('');
   const [interactionTo, setInteractionTo] = useState('');
@@ -65,13 +67,14 @@ export function ContactsPage() {
         status,
         tag,
         organizationId,
+        accountStatus,
         sort,
         interactionFrom,
         interactionTo,
         page,
         limit: 20,
       }),
-    [debouncedTerm, status, tag, organizationId, sort, interactionFrom, interactionTo, page],
+    [debouncedTerm, status, tag, organizationId, accountStatus, sort, interactionFrom, interactionTo, page],
   );
 
   const { data, loading, error, reload } = useApi<ContactsResponse>(`/contacts${query}`);
@@ -83,7 +86,7 @@ export function ContactsPage() {
   // Reset to the first page whenever the filters change.
   useEffect(() => {
     setPage(1);
-  }, [debouncedTerm, status, tag, organizationId, sort, interactionFrom, interactionTo]);
+  }, [debouncedTerm, status, tag, organizationId, accountStatus, sort, interactionFrom, interactionTo]);
 
   const setOpenId = (id: string | null) => {
     const next = new URLSearchParams(searchParams);
@@ -105,6 +108,7 @@ export function ContactsPage() {
     status !== 'all',
     tag !== 'all',
     organizationId !== 'all',
+    accountStatus !== 'all',
     !!interactionFrom,
     !!interactionTo,
   ].filter(Boolean).length;
@@ -241,6 +245,22 @@ export function ContactsPage() {
                 includeAll
                 allLabel="Any organization"
                 onChange={(event) => setOrganizationId(event.target.value)}
+              />
+            </label>
+            <label className="block">
+              <span className="label">Community account</span>
+              <Select
+                value={accountStatus}
+                options={[
+                  { value: 'any', label: 'Has an account' },
+                  { value: 'active', label: 'Account active' },
+                  { value: 'pending', label: 'Account pending' },
+                  { value: 'deactivated', label: 'Account deactivated' },
+                  { value: 'none', label: 'No account' },
+                ]}
+                includeAll
+                allLabel="Any"
+                onChange={(event) => setAccountStatus(event.target.value)}
               />
             </label>
             <div className="grid grid-cols-2 gap-2">
@@ -436,6 +456,11 @@ function ContactCard({
             <div className="flex flex-wrap items-center gap-1.5">
               <h3 className="truncate font-bold text-navy-800">{contact.fullName}</h3>
               {contact.isStudentFounder && <Chip tone="gold">Student Founder</Chip>}
+              {contact.communityAccount && (
+                <Chip tone={ACCOUNT_STATUS_TONES[contact.communityAccount.status]}>
+                  {humanise(contact.communityAccount.accountType)} account · {humanise(contact.communityAccount.status)}
+                </Chip>
+              )}
             </div>
             {contact.organizationName ? (
               <p className="truncate text-sm text-slate-600">

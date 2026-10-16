@@ -7,8 +7,8 @@ import { nowIso } from './time.ts';
  * DB-backed sessions. A bearer token is an opaque random string; only its
  * SHA-256 hash is stored, so a database dump does not hand out live sessions.
  * Verifying a session joins straight through to `users`, so a soft-deleted or
- * removed team member loses access on their very next request -- a stateless
- * JWT could not do that without a separate deny-list.
+ * removed team member (or a deactivated community member) loses access on their
+ * very next request -- a stateless JWT could not do that without a deny-list.
  */
 
 export interface SessionUser {
@@ -59,7 +59,12 @@ export async function getSessionUser(db: Db, token: string): Promise<SessionUser
             u.email AS email, u.name AS name, u.role AS role
        FROM sessions s
        JOIN users u ON u.id = s.user_id
-      WHERE s.token_hash = ? AND s.expires_at > ? AND u.deleted_at IS NULL`,
+       LEFT JOIN community_accounts ca ON ca.user_id = u.id
+      WHERE s.token_hash = ? AND s.expires_at > ? AND u.deleted_at IS NULL
+        -- A deactivated community-only account is signed out everywhere at once.
+        -- (Deactivating a staff member's community identity leaves their CRM
+        -- access alone; the community guards refuse that identity instead.)
+        AND NOT (u.role = 'member' AND COALESCE(ca.status, '') = 'deactivated')`,
     [await hashToken(token), nowIso()],
   );
   if (!row) return null;

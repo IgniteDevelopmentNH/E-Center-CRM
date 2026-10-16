@@ -61,13 +61,13 @@ export function DashboardPage() {
           label="Active contacts"
           value={stats.activeContacts}
           detail={`${stats.totalContacts} total · ${stats.organizations} organizations`}
-          onClick={() => navigate('/contacts?status=active')}
+          onClick={() => navigate('/admin/contacts?status=active')}
         />
         <StatCard
           label="Due this week"
           value={stats.tasksDueThisWeek}
           detail="Next 7 days"
-          onClick={() => navigate('/tasks')}
+          onClick={() => navigate('/admin/tasks')}
         />
         <StatCard
           label="Upcoming events"
@@ -77,13 +77,13 @@ export function DashboardPage() {
               ? `Next: ${formatDate(stats.nextEventAt)}`
               : 'Nothing scheduled'
           }
-          onClick={() => navigate('/events')}
+          onClick={() => navigate('/admin/events')}
         />
         <StatCard
           label="Team members"
           value={stats.teamMembers}
           detail="Shared visibility"
-          onClick={() => navigate('/settings')}
+          onClick={() => navigate('/admin/settings')}
         />
       </div>
 
@@ -94,7 +94,7 @@ export function DashboardPage() {
             <h2 className="text-sm font-bold uppercase tracking-wide">
               {data.overdueTasks.length} overdue follow-up{data.overdueTasks.length === 1 ? '' : 's'}
             </h2>
-            <Link to="/tasks?status=overdue" className="ml-auto text-xs font-semibold underline">
+            <Link to="/admin/tasks?status=overdue" className="ml-auto text-xs font-semibold underline">
               View all
             </Link>
           </div>
@@ -116,7 +116,7 @@ export function DashboardPage() {
                     <span className="font-semibold text-urgent">{dueLabel(task.dueDate)}</span>
                     {task.contactId && (
                       <Link
-                        to={`/contacts?open=${task.contactId}`}
+                        to={`/admin/contacts?open=${task.contactId}`}
                         className="font-semibold text-teal-700 hover:underline"
                       >
                         {task.contactName}
@@ -137,7 +137,7 @@ export function DashboardPage() {
             title="This week's focus"
             count={data.thisWeek.length}
             action={
-              <Link to="/tasks" className="text-xs font-semibold text-teal-700 hover:underline">
+              <Link to="/admin/tasks" className="text-xs font-semibold text-teal-700 hover:underline">
                 View all
               </Link>
             }
@@ -171,7 +171,7 @@ export function DashboardPage() {
                       <span className="text-slate-500">{dueLabel(task.dueDate)}</span>
                       {task.contactId && (
                         <Link
-                          to={`/contacts?open=${task.contactId}`}
+                          to={`/admin/contacts?open=${task.contactId}`}
                           className="font-semibold text-teal-700 hover:underline"
                         >
                           {task.contactName}
@@ -194,7 +194,7 @@ export function DashboardPage() {
               title="Upcoming events"
               count={data.upcomingEvents.length}
               action={
-                <Link to="/events" className="text-xs font-semibold text-teal-700 hover:underline">
+                <Link to="/admin/events" className="text-xs font-semibold text-teal-700 hover:underline">
                   View all
                 </Link>
               }
@@ -205,7 +205,7 @@ export function DashboardPage() {
               <ul className="space-y-2">
                 {data.upcomingEvents.slice(0, 5).map((event) => (
                   <li key={event.id}>
-                    <Link to={`/events?open=${event.id}`} className="card-interactive block p-3">
+                    <Link to={`/admin/events?open=${event.id}`} className="card-interactive block p-3">
                       <p className="font-semibold text-navy-800">{event.name}</p>
                       <p className="text-xs text-slate-500">
                         {formatDate(event.startsAt)} · {formatTime(event.startsAt)}
@@ -231,7 +231,7 @@ export function DashboardPage() {
                     <p className="truncate text-xs capitalize text-slate-400">{member.role}</p>
                   </div>
                   <Link
-                    to={`/tasks?assignedTo=${member.id}&status=incomplete`}
+                    to={`/admin/tasks?assignedTo=${member.id}&status=incomplete`}
                     className="shrink-0 text-right"
                   >
                     <span className="block text-lg font-bold text-navy">{member.openTaskCount}</span>
@@ -270,7 +270,7 @@ export function DashboardPage() {
                 <div className="min-w-0 flex-1">
                   {item.contactId ? (
                     <Link
-                      to={`/contacts?open=${item.contactId}`}
+                      to={`/admin/contacts?open=${item.contactId}`}
                       className="font-semibold text-navy-800 hover:underline"
                     >
                       {item.title}

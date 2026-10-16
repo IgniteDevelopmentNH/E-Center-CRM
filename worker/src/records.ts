@@ -139,6 +139,14 @@ export function contactOut(row: Record<string, unknown>) {
     noteCount: num(row.note_count),
     openTaskCount: num(row.open_task_count),
     documentCount: num(row.document_count),
+    // Linked community account (staff view only -- contacts never reach community routes).
+    communityAccount: row.account_user_id
+      ? {
+          userId: String(row.account_user_id),
+          accountType: String(row.account_type),
+          status: String(row.account_status),
+        }
+      : null,
   };
 }
 
@@ -221,6 +229,7 @@ export function eventOut(row: Record<string, unknown>) {
     location: text(row.location),
     description: text(row.description),
     followupNotes: text(row.followup_notes),
+    communityVisible: num(row.community_visible) === 1,
     attendeeCount: num(row.attendee_count),
     externalId: text(row.external_id),
     createdAt: iso(row.created_at),

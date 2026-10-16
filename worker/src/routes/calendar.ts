@@ -2,7 +2,7 @@ import { audit } from '../lib/audit.ts';
 import { badRequest, jsonResponse, readJson } from '../lib/http.ts';
 import { signValue, verifyValue } from '../lib/signedToken.ts';
 import { requiredString } from '../lib/validate.ts';
-import { requireAuth, requireOwner } from '../middleware/auth.ts';
+import { requireStaff, requireOwner } from '../middleware/auth.ts';
 import type { Ctx, Router } from '../router.ts';
 import { syncCalendar } from '../services/calendarSync.ts';
 import { authorizeUrl, disconnect, getCredentials, saveAppRegistration } from '../services/graph.ts';
@@ -69,7 +69,7 @@ export function register(router: Router): void {
   });
 
   router.get('/api/calendar/status', async (ctx: Ctx) => {
-    const { customerId } = requireAuth(ctx);
+    const { customerId } = requireStaff(ctx);
     const credentials = await getCredentials(ctx.db, customerId, ctx.config.encryptionKey);
     const sync = await ctx.db.get(`SELECT * FROM calendar_sync_metadata WHERE customer_id = ?`, [customerId]);
 
@@ -127,7 +127,7 @@ export function register(router: Router): void {
   });
 
   router.post('/api/calendar/sync', async (ctx: Ctx) => {
-    const { customerId, userId } = requireAuth(ctx);
+    const { customerId, userId } = requireStaff(ctx);
     const result = await syncCalendar(ctx.db, customerId, userId, ctx.config);
     return jsonResponse(result);
   });

@@ -4,7 +4,7 @@ import { newId } from '../lib/ids.ts';
 import { signValue, verifyValue } from '../lib/signedToken.ts';
 import { nowIso } from '../lib/time.ts';
 import { optionalId, requiredString } from '../lib/validate.ts';
-import { requireAuth, requireEditor } from '../middleware/auth.ts';
+import { requireStaff, requireEditor } from '../middleware/auth.ts';
 import { documentOut } from '../records.ts';
 import type { Ctx, Router } from '../router.ts';
 import {
@@ -24,7 +24,7 @@ const SELECT_DOCUMENT = `
 
 export function register(router: Router): void {
   router.get('/api/documents', async (ctx: Ctx) => {
-    const { customerId } = requireAuth(ctx);
+    const { customerId } = requireStaff(ctx);
     const where = ['d.customer_id = ?', 'd.deleted_at IS NULL'];
     const params: (string | number)[] = [customerId];
 
@@ -152,7 +152,7 @@ export function register(router: Router): void {
 
   /** Issues a time-limited download URL and records the access. */
   router.get('/api/documents/:id/download', async (ctx: Ctx) => {
-    const { customerId, userId } = requireAuth(ctx);
+    const { customerId, userId } = requireStaff(ctx);
     const document_ = await ctx.db.get<{ id: string; file_name: string; storage_key: string }>(
       `SELECT id, file_name, storage_key FROM documents
         WHERE id = ? AND customer_id = ? AND deleted_at IS NULL`,

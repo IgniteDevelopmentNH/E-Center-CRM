@@ -283,7 +283,7 @@ export function TasksPage() {
                     </span>
                     {task.contactId && (
                       <Link
-                        to={`/contacts?open=${task.contactId}`}
+                        to={`/admin/contacts?open=${task.contactId}`}
                         className="font-semibold text-teal-700 hover:underline"
                       >
                         {task.contactName}

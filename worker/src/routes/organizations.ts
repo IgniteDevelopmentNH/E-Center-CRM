@@ -4,7 +4,7 @@ import { badRequest, jsonResponse, notFound, readJson } from '../lib/http.ts';
 import { newId } from '../lib/ids.ts';
 import { nowIso } from '../lib/time.ts';
 import { oneOf, optionalString, optionalUrl, positiveInt, requiredString } from '../lib/validate.ts';
-import { requireAuth, requireEditor } from '../middleware/auth.ts';
+import { requireStaff, requireEditor } from '../middleware/auth.ts';
 import { ORG_STATUSES, ORG_TYPES, contactOut, organizationOut } from '../records.ts';
 import type { Ctx, Router } from '../router.ts';
 
@@ -34,7 +34,7 @@ const SORTS: Record<string, string> = {
 
 export function register(router: Router): void {
   router.get('/api/organizations', async (ctx: Ctx) => {
-    const { customerId } = requireAuth(ctx);
+    const { customerId } = requireStaff(ctx);
     const where: string[] = ['o.customer_id = ?', 'o.deleted_at IS NULL'];
     const params: SqlParam[] = [customerId];
 
@@ -84,7 +84,7 @@ export function register(router: Router): void {
 
   /** Detail view: the organization plus every linked person and their role. */
   router.get('/api/organizations/:id', async (ctx: Ctx) => {
-    const { customerId } = requireAuth(ctx);
+    const { customerId } = requireStaff(ctx);
     const row = await ctx.db.get(
       `${SELECT_ORG} WHERE o.id = ? AND o.customer_id = ? AND o.deleted_at IS NULL`,
       [ctx.params.id!, customerId],

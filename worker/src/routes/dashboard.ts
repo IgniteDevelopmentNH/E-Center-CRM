@@ -1,6 +1,6 @@
 import { jsonResponse } from '../lib/http.ts';
 import { addDaysToDate, daysAgoIso, isoDaysFromNow, nowIso, todayDate } from '../lib/time.ts';
-import { requireAuth } from '../middleware/auth.ts';
+import { requireStaff } from '../middleware/auth.ts';
 import { eventOut, taskOut } from '../records.ts';
 import type { Ctx, Router } from '../router.ts';
 
@@ -24,7 +24,7 @@ interface ActivityItem {
 /** Everything the dashboard renders, in one request. */
 export function register(router: Router): void {
   router.get('/api/dashboard', async (ctx: Ctx) => {
-    const { customerId } = requireAuth(ctx);
+    const { customerId } = requireStaff(ctx);
     const { db } = ctx;
     const today = todayDate();
     const weekOut = addDaysToDate(today, 7);
@@ -45,7 +45,7 @@ export function register(router: Router): void {
                  AND due_date < ?) AS overdue_tasks,
              (SELECT COUNT(*) FROM events
                WHERE customer_id = ? AND deleted_at IS NULL AND starts_at >= ? AND starts_at <= ?) AS upcoming_events,
-             (SELECT COUNT(*) FROM users WHERE customer_id = ? AND deleted_at IS NULL) AS team_members,
+             (SELECT COUNT(*) FROM users WHERE customer_id = ? AND deleted_at IS NULL AND role IN ('owner', 'editor', 'viewer')) AS team_members,
              (SELECT COUNT(*) FROM organizations WHERE customer_id = ? AND deleted_at IS NULL) AS organizations`,
           [
             customerId,
@@ -105,7 +105,7 @@ export function register(router: Router): void {
                     WHERE t.assigned_to = u.id AND t.deleted_at IS NULL
                       AND t.status <> 'complete' AND t.due_date < ?) AS overdue_task_count
              FROM users u
-            WHERE u.customer_id = ? AND u.deleted_at IS NULL
+            WHERE u.customer_id = ? AND u.deleted_at IS NULL AND u.role IN ('owner', 'editor', 'viewer')
             ORDER BY LOWER(u.name) ASC`,
           [today, customerId],
         ),

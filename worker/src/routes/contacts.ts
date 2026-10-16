@@ -14,9 +14,10 @@ import {
   requiredString,
   tagList,
 } from '../lib/validate.ts';
-import { requireAuth, requireEditor } from '../middleware/auth.ts';
+import { requireStaff, requireEditor } from '../middleware/auth.ts';
 import { CONTACT_STATUSES, contactOut } from '../records.ts';
 import type { Ctx, Router } from '../router.ts';
+import { withSystemTags } from '../services/community.ts';
 
 /**
  * Aggregates every contact card needs in one pass: linked organization,
@@ -46,10 +47,14 @@ const SELECT_CONTACT = `
          (SELECT json_group_array(json_object('id', org.id, 'name', org.name, 'role', co.org_role))
             FROM contact_organizations co
             JOIN organizations org ON org.id = co.organization_id AND org.deleted_at IS NULL
-           WHERE co.contact_id = c.id) AS organizations_json
+           WHERE co.contact_id = c.id) AS organizations_json,
+         acct.user_id AS account_user_id,
+         acct.account_type AS account_type,
+         acct.status AS account_status
     FROM contacts c
     LEFT JOIN organizations o ON o.id = c.organization_id
-    LEFT JOIN users creator ON creator.id = c.created_by`;
+    LEFT JOIN users creator ON creator.id = c.created_by
+    LEFT JOIN community_accounts acct ON acct.contact_id = c.id`;
 
 const SORTS: Record<string, string> = {
   name: 'LOWER(c.last_name) ASC, LOWER(c.first_name) ASC',
@@ -100,6 +105,19 @@ function buildFilters(customerId: string, query: URLSearchParams) {
 
   if (query.get('studentFoundersOnly') === 'true') where.push('c.is_student_founder = 1');
 
+  // Linked community account status: active | pending | deactivated, or any / none.
+  const accountStatus = query.get('accountStatus');
+  if (accountStatus && accountStatus !== 'all') {
+    if (accountStatus === 'none') {
+      where.push('NOT EXISTS (SELECT 1 FROM community_accounts ca WHERE ca.contact_id = c.id)');
+    } else if (accountStatus === 'any') {
+      where.push('EXISTS (SELECT 1 FROM community_accounts ca WHERE ca.contact_id = c.id)');
+    } else {
+      where.push('EXISTS (SELECT 1 FROM community_accounts ca WHERE ca.contact_id = c.id AND ca.status = ?)');
+      params.push(oneOf(accountStatus, 'Account status', ['active', 'pending', 'deactivated'] as const));
+    }
+  }
+
   const interactionFrom = query.get('interactionFrom');
   if (interactionFrom) {
     where.push(
@@ -120,7 +138,7 @@ function buildFilters(customerId: string, query: URLSearchParams) {
 
 export function register(router: Router): void {
   router.get('/api/contacts', async (ctx: Ctx) => {
-    const { customerId } = requireAuth(ctx);
+    const { customerId } = requireStaff(ctx);
     const { clause, params } = buildFilters(customerId, ctx.query);
 
     const sortKey = ctx.query.get('sort') ?? 'name';
@@ -151,7 +169,7 @@ export function register(router: Router): void {
 
   /** Tag and organization values in use, for populating filter dropdowns. */
   router.get('/api/contacts/facets', async (ctx: Ctx) => {
-    const { customerId } = requireAuth(ctx);
+    const { customerId } = requireStaff(ctx);
     const rows = await ctx.db.all<{ tags: string }>(
       `SELECT tags FROM contacts WHERE customer_id = ? AND deleted_at IS NULL`,
       [customerId],
@@ -174,7 +192,7 @@ export function register(router: Router): void {
   });
 
   router.get('/api/contacts/export.csv', async (ctx: Ctx) => {
-    const { customerId, userId } = requireAuth(ctx);
+    const { customerId, userId } = requireStaff(ctx);
     const { clause, params } = buildFilters(customerId, ctx.query);
     const rows = await ctx.db.all(`${SELECT_CONTACT} WHERE ${clause} ORDER BY ${SORTS.name}`, params);
     const contacts = rows.map(contactOut);
@@ -216,7 +234,7 @@ export function register(router: Router): void {
   });
 
   router.get('/api/contacts/:id', async (ctx: Ctx) => {
-    const { customerId } = requireAuth(ctx);
+    const { customerId } = requireStaff(ctx);
     const row = await ctx.db.get(
       `${SELECT_CONTACT} WHERE c.id = ? AND c.customer_id = ? AND c.deleted_at IS NULL`,
       [ctx.params.id!, customerId],
@@ -228,7 +246,7 @@ export function register(router: Router): void {
   router.post('/api/contacts', async (ctx: Ctx) => {
     const { customerId, userId } = requireEditor(ctx);
     const body = await readJson(ctx.req);
-    const fields = await parseContact(ctx, body, customerId);
+    const fields = await parseContact(ctx, body, customerId, null);
     const id = newId();
     const timestamp = nowIso();
 
@@ -278,7 +296,7 @@ export function register(router: Router): void {
     if (!existing) throw notFound('That contact no longer exists.');
 
     const body = await readJson(ctx.req);
-    const fields = await parseContact(ctx, body, customerId);
+    const fields = await parseContact(ctx, body, customerId, ctx.params.id!);
     await ctx.db.run(
       `UPDATE contacts SET
          first_name = ?, last_name = ?, email = ?, phone = ?, how_we_connected = ?, tags = ?,
@@ -343,7 +361,12 @@ export function register(router: Router): void {
       } catch {
         tags = [];
       }
-      const next = [...new Set([...tags.filter((t) => !remove.includes(t)), ...add])];
+      // "Created Account" is system-managed: bulk edits can neither add nor remove it.
+      const next = await withSystemTags(
+        ctx.db,
+        id,
+        [...new Set([...tags.filter((t) => !remove.includes(t)), ...add])],
+      );
       await ctx.db.run(
         `UPDATE contacts SET tags = ?, is_student_founder = ?, updated_at = ?, last_edited_by = ?
           WHERE id = ? AND customer_id = ?`,
@@ -367,6 +390,12 @@ export function register(router: Router): void {
 
     const timestamp = nowIso();
     const id = ctx.params.id!;
+    // A linked community account is kept (and stays signed in) but released
+    // from this contact, for staff to re-link from Community members.
+    const linkedAccount = await ctx.db.get<{ user_id: string }>(
+      `SELECT user_id FROM community_accounts WHERE contact_id = ?`,
+      [id],
+    );
     // Cascades the soft delete atomically so the timeline and task lists stay consistent.
     // A note shared with other contacts survives; only notes left with no contact go.
     await ctx.db.batch([
@@ -403,7 +432,23 @@ export function register(router: Router): void {
         sql: `UPDATE tasks SET deleted_at = ? WHERE contact_id = ? AND deleted_at IS NULL`,
         params: [timestamp, id],
       },
+      {
+        sql: `UPDATE community_accounts SET contact_id = NULL, link_state = 'unlinked', updated_at = ? WHERE contact_id = ?`,
+        params: [timestamp, id],
+      },
     ]);
+
+    if (linkedAccount) {
+      await audit(ctx.db, {
+        customerId,
+        userId,
+        action: 'community.unlinked',
+        entityType: 'contact',
+        entityId: id,
+        metadata: { accountUserId: linkedAccount.user_id, reason: 'contact deleted' },
+        req: ctx.req,
+      });
+    }
 
     await audit(ctx.db, {
       customerId,
@@ -419,8 +464,14 @@ export function register(router: Router): void {
 }
 
 /** Shared field parsing for create and update. */
-async function parseContact(ctx: Ctx, body: Record<string, unknown>, customerId: string) {
-  const tags = tagList(body.tags);
+async function parseContact(
+  ctx: Ctx,
+  body: Record<string, unknown>,
+  customerId: string,
+  contactId: string | null,
+) {
+  // "Created Account" is system-managed: it follows the community link, not the form.
+  const tags = await withSystemTags(ctx.db, contactId, tagList(body.tags));
 
   // A contact can belong to several organizations. Accept the new `organizationIds`
   // array; fall back to the single `organizationId` for older callers.

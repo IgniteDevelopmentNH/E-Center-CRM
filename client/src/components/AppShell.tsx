@@ -9,13 +9,15 @@ import { useAuth } from '../state/AuthContext.tsx';
 import { Avatar, Chip, Spinner } from './ui.tsx';
 
 const TABS = [
-  { to: '/', label: 'Dashboard', icon: '▦' },
-  { to: '/contacts', label: 'Contacts', icon: '☺' },
-  { to: '/notes', label: 'Notes', icon: '✎' },
-  { to: '/tasks', label: 'Follow-ups', icon: '✓' },
-  { to: '/organizations', label: 'Organizations', icon: '⌂' },
-  { to: '/events', label: 'Events', icon: '▣' },
-  { to: '/settings', label: 'Settings', icon: '⚙' },
+  { to: '/admin', label: 'Dashboard', icon: '▦' },
+  { to: '/admin/contacts', label: 'Contacts', icon: '☺' },
+  { to: '/admin/notes', label: 'Notes', icon: '✎' },
+  { to: '/admin/tasks', label: 'Follow-ups', icon: '✓' },
+  { to: '/admin/organizations', label: 'Organizations', icon: '⌂' },
+  { to: '/admin/events', label: 'Events', icon: '▣' },
+  { to: '/admin/posts', label: 'Posts', icon: '▤' },
+  { to: '/admin/members', label: 'Members', icon: '◎' },
+  { to: '/admin/settings', label: 'Settings', icon: '⚙' },
 ];
 
 export function AppShell({ children }: { children: ReactNode }) {
@@ -28,7 +30,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     <div className="flex min-h-screen flex-col">
       <header className="sticky top-0 z-40 bg-navy text-white shadow-raised">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-3 px-4 py-3 sm:flex-nowrap">
-          <Link to="/" className="flex shrink-0 items-center gap-3" aria-label="UNH ECenter CRM home">
+          <Link to="/admin" className="flex shrink-0 items-center gap-3" aria-label="UNH ECenter CRM home">
             <img src="/unh-logo.svg" alt="University of New Hampshire" className="h-8 w-auto sm:h-9" />
             <span className="hidden h-8 w-px bg-white/25 sm:block" aria-hidden="true" />
             <span className="hidden text-xl font-bold leading-tight sm:block">ECenter CRM</span>
@@ -73,7 +75,15 @@ export function AppShell({ children }: { children: ReactNode }) {
                     {customer && <p className="mt-1 text-xs text-slate-400">{customer.name}</p>}
                   </div>
                   <Link
-                    to="/settings"
+                    to="/"
+                    onClick={() => setMenuOpen(false)}
+                    className="block px-4 py-2.5 text-sm hover:bg-slate-50"
+                    role="menuitem"
+                  >
+                    Switch to community portal
+                  </Link>
+                  <Link
+                    to="/admin/settings"
                     onClick={() => setMenuOpen(false)}
                     className="block px-4 py-2.5 text-sm hover:bg-slate-50"
                     role="menuitem"
@@ -100,7 +110,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               <NavLink
                 key={tab.to}
                 to={tab.to}
-                end={tab.to === '/'}
+                end={tab.to === '/admin'}
                 className={({ isActive }) => `tab-link ${isActive ? 'tab-link-active' : ''}`}
               >
                 <span aria-hidden="true">{tab.icon}</span>
@@ -132,9 +142,9 @@ export function AppShell({ children }: { children: ReactNode }) {
               />
               <div className="mb-3 flex flex-col items-end gap-2">
                 {[
-                  { label: 'New contact', to: '/contacts' },
-                  { label: 'New note', to: '/notes' },
-                  { label: 'New follow-up', to: '/tasks' },
+                  { label: 'New contact', to: '/admin/contacts' },
+                  { label: 'New note', to: '/admin/notes' },
+                  { label: 'New follow-up', to: '/admin/tasks' },
                 ].map((action) => (
                   <button
                     key={action.to}
@@ -259,7 +269,7 @@ function GlobalSearch() {
                     title={contact.fullName}
                     detail={contact.organizationName ?? contact.email}
                     meta={formatRelative(contact.lastInteractionAt)}
-                    onClick={() => go(`/contacts?open=${contact.id}`)}
+                    onClick={() => go(`/admin/contacts?open=${contact.id}`)}
                   />
                 ))}
               </SearchGroup>
@@ -273,7 +283,7 @@ function GlobalSearch() {
                     title={org.name}
                     detail={org.location ?? undefined}
                     meta={`${org.contactCount} ${org.contactCount === 1 ? 'person' : 'people'}`}
-                    onClick={() => go(`/organizations?open=${org.id}`)}
+                    onClick={() => go(`/admin/organizations?open=${org.id}`)}
                   />
                 ))}
               </SearchGroup>
@@ -287,7 +297,7 @@ function GlobalSearch() {
                     title={note.contactName ?? 'Note'}
                     detail={truncate(note.content, 70)}
                     meta={formatRelative(note.createdAt)}
-                    onClick={() => go(`/notes?contactId=${note.contactId}`)}
+                    onClick={() => go(`/admin/notes?contactId=${note.contactId}`)}
                   />
                 ))}
               </SearchGroup>
@@ -301,7 +311,7 @@ function GlobalSearch() {
                     title={task.title}
                     detail={task.contactName ?? undefined}
                     meta={<Chip tone={task.isOverdue ? 'red' : 'slate'}>{task.dueDate}</Chip>}
-                    onClick={() => go('/tasks')}
+                    onClick={() => go('/admin/tasks')}
                   />
                 ))}
               </SearchGroup>
@@ -315,7 +325,7 @@ function GlobalSearch() {
                     title={event.name}
                     detail={event.location ?? undefined}
                     meta={formatRelative(event.startsAt)}
-                    onClick={() => go(`/events?open=${event.id}`)}
+                    onClick={() => go(`/admin/events?open=${event.id}`)}
                   />
                 ))}
               </SearchGroup>

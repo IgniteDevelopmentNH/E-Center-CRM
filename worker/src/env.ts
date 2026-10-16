@@ -1,6 +1,21 @@
 import type { D1Database, R2Bucket } from '@cloudflare/workers-types';
 
 /**
+ * The slice of Cloudflare Email Service's `send_email` binding this app uses
+ * (wrangler.toml: `send_email = [{ name = "EMAIL" }]`). Declared locally so the
+ * Worker does not depend on a specific workers-types release for the shape.
+ */
+export interface EmailBinding {
+  send(message: {
+    to: string;
+    from: { email: string; name?: string };
+    subject: string;
+    text: string;
+    html?: string;
+  }): Promise<unknown>;
+}
+
+/**
  * Cloudflare bindings (wrangler.toml) plus vars and secrets. Workers pass this
  * fresh to every request -- there is no module-level singleton the way a
  * long-running Node process would have, so config is derived per-request.
@@ -9,6 +24,8 @@ export interface Env {
   DB: D1Database;
   DOCS: R2Bucket;
   ASSETS: Fetcher;
+  /** Optional until a sending domain is onboarded -- see README "Email". */
+  EMAIL?: EmailBinding;
 
   // [vars] in wrangler.toml
   DEFAULT_CUSTOMER_SLUG?: string;
@@ -19,6 +36,12 @@ export interface Env {
   JWT_TTL_REMEMBER_SECONDS?: string;
   MICROSOFT_REDIRECT_URI?: string;
   APP_URL?: string;
+  /** Sender for verification / password-reset email, on a domain onboarded to Email Service. */
+  MAIL_FROM?: string;
+  MAIL_FROM_NAME?: string;
+  /** Local dev only: "true" prints emailed links to the console when no EMAIL binding exists. */
+  EMAIL_DEV_LOG?: string;
+  COMMUNITY_UPLOAD_MAX_BYTES?: string;
 
   // Secrets -- set with `wrangler secret put NAME`, never written to this file.
   JWT_SECRET?: string;
@@ -43,6 +66,8 @@ export interface Config {
   defaultCustomer: { slug: string; name: string };
   microsoft: { redirectUri: string; scopes: string[] };
   appUrl: string;
+  mail: { from: string; fromName: string; devLog: boolean };
+  communityUploadMaxBytes: number;
   tokenSecret: string;
   encryptionKey: string;
 }
@@ -80,6 +105,12 @@ export function loadConfig(env: Env): Config {
       ],
     },
     appUrl: env.APP_URL || '',
+    mail: {
+      from: env.MAIL_FROM || '',
+      fromName: env.MAIL_FROM_NAME || 'UNH ECenter',
+      devLog: env.EMAIL_DEV_LOG === 'true',
+    },
+    communityUploadMaxBytes: int(env.COMMUNITY_UPLOAD_MAX_BYTES, 5 * 1024 * 1024),
     tokenSecret: env.JWT_SECRET,
     encryptionKey: env.ENCRYPTION_KEY,
   };

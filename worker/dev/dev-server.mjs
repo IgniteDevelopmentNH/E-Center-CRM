@@ -48,6 +48,11 @@ const env = {
   MICROSOFT_REDIRECT_URI:
     process.env.MICROSOFT_REDIRECT_URI || `http://localhost:${PORT}/api/calendar/microsoft/callback`,
   APP_URL: process.env.APP_URL || 'http://localhost:5173',
+  // No Email Service binding locally: verification / reset links are printed to
+  // this console instead (EMAIL_DEV_LOG defaults to on for the dev server).
+  EMAIL_DEV_LOG: process.env.EMAIL_DEV_LOG || 'true',
+  MAIL_FROM: process.env.MAIL_FROM || '',
+  COMMUNITY_UPLOAD_MAX_BYTES: process.env.COMMUNITY_UPLOAD_MAX_BYTES || '5242880',
   JWT_SECRET: process.env.JWT_SECRET,
   ENCRYPTION_KEY: process.env.ENCRYPTION_KEY,
 };

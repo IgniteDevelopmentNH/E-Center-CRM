@@ -30,6 +30,7 @@ separate backend host, no database server to run.
 - [Environment and secrets](#environment-and-secrets)
 - [Database](#database)
 - [What is in each tab](#what-is-in-each-tab)
+- [Community portal](#community-portal)
 - [Security and compliance](#security-and-compliance)
 - [Multi-tenancy](#multi-tenancy)
 - [Document storage (R2)](#document-storage-r2)
@@ -55,12 +56,19 @@ npm run seed                # load the demo tenant and sample data
 npm run dev                  # Worker dev server on :8788, Vite on :5173
 ```
 
-Open <http://localhost:5173> and sign in:
+Open <http://localhost:5173> and sign in. Staff land on the CRM at `/admin`; community members land on
+the community feed at `/`.
 
-| Email           | Password  | Role   |
-| --------------- | --------- | ------ |
-| `lisa@unh.edu`  | `test123` | Owner  |
-| `bella@unh.edu` | `test123` | Editor |
+| Email                        | Password  | Role                                  |
+| ---------------------------- | --------- | ------------------------------------- |
+| `lisa@unh.edu`               | `test123` | Owner (staff)                         |
+| `bella@unh.edu`              | `test123` | Editor (staff)                        |
+| `maya.chen@example.org`      | `test123` | Community student (local demo only)   |
+| `priya.raghavan@example.com` | `test123` | Community mentor, linked to a contact |
+| `jordan.lee@example.org`     | `test123` | Community mentor (local demo only)    |
+
+There is no email service locally: verification and password-reset links are printed to the
+`npm run dev:api` console (see [Email verification and password reset](#email-verification-and-password-reset)).
 
 (You can also open <http://localhost:8788> directly -- the Worker dev server serves the built
 client itself, the same way production does.)
@@ -82,7 +90,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 | `npm run migrate`    | Apply `worker/src/db/schema.sql` to the **local** dev database        |
 | `npm run seed`       | Reload the demo tenant into the **local** dev database                 |
 | `npm run reset`      | Empty every table in the **local** dev database                       |
-| `npm test`           | End-to-end API test suite (38 tests), no server needed                  |
+| `npm test`           | End-to-end API test suites (CRM + community portal), no server needed   |
 | `npm run typecheck`  | TypeScript check for the Worker (both its runtime and Node tsconfigs) and the client |
 | `npm run deploy`     | `wrangler deploy` -- ships the Worker + client to Cloudflare             |
 
@@ -213,7 +221,10 @@ the local `node:sqlite` shim) both speak natively -- no translation layer needed
 
 **Tables:** `customers`, `users`, `sessions`, `user_preferences`, `organizations`, `contacts`,
 `contact_organizations`, `notes`, `note_contacts`, `tasks`, `events`, `event_attendees`, `documents`,
-`audit_logs`, `microsoft_oauth_credentials`, `calendar_sync_metadata`, `event_external_mapping`.
+`audit_logs`, `microsoft_oauth_credentials`, `calendar_sync_metadata`, `event_external_mapping`, and
+for the community portal `community_accounts`, `community_profiles`, `interest_tags`,
+`community_profile_tags`, `auth_tokens`, `posts`, `conversations`, `conversation_members`, `messages`,
+`rate_limit_events`.
 
 A contact can belong to several organizations (`contact_organizations`) and a note can be filed under
 several contacts or none at all (`note_contacts`); in both cases the junction table is the source of
@@ -240,6 +251,19 @@ npx wrangler d1 execute ecenter-crm --remote \
 That migration adds the `contact_organizations` and `note_contacts` junctions, the `documents.note_id`
 column, backfills both junctions from the existing primary links, and rebuilds `notes` so `contact_id`
 becomes nullable (notes with no contact). It is not needed for a database created from `schema.sql`.
+
+`2026-10-12-community-portal.sql` adds the community portal. It is **purely additive**: two
+defaulted columns (`users.email_verified_at`, and `events.community_visible`, which defaults to
+hidden) plus new tables and indexes. No existing row is rewritten. Apply it once, before deploying
+the matching build (try it on a copy or preview database first):
+
+```bash
+npx wrangler d1 execute ecenter-crm --remote \
+  --file=./worker/src/db/migrations/2026-10-12-community-portal.sql
+```
+
+Locally, `npm run migrate` adds any missing columns to an older dev database before applying
+`schema.sql`, so an existing `worker/data/dev.db` upgrades in place.
 
 ---
 
@@ -296,6 +320,182 @@ snapshot with open counts, and a merged recent-activity feed. All of it in one A
 
 Team management with roles, preferences, CSV exports, Outlook connection, document configuration,
 and a readable audit log.
+
+---
+
+## Community portal
+
+The community portal is a second interface on the same Worker, database, sessions and R2 bucket.
+Students and mentors sign up, read ECenter news, find mentors and message each other. The CRM moved
+under `/admin`.
+
+### Routes
+
+| Path | Who | What |
+| --- | --- | --- |
+| `/` | Members, staff | Community feed (signed-out visitors see the join / sign-in page) |
+| `/signup` | Anyone | Two-step onboarding: account and role, then an optional "about you" step |
+| `/mentorship` | Members, staff | Recommended mentors; browse, search and filter all mentors |
+| `/network` | Members, staff | Member directory with type and topic filters |
+| `/messages` | Active community identity | One-to-one messaging |
+| `/profile` | Signed in | Your own profile, photo, private resume, email and password |
+| `/members/:id` | Members, staff | A member's public profile |
+| `/login`, `/verify-email`, `/forgot-password`, `/reset-password` | Anyone | Sign-in and account flows |
+| `/admin/*` | Staff only | The CRM: Dashboard, Contacts, Notes, Follow-ups, Organizations, Events, **Posts**, **Members**, Settings |
+
+The old CRM paths (`/contacts`, `/notes`, `/tasks`, `/organizations`, `/events`, `/settings`)
+redirect to their `/admin/...` equivalents and keep any query string. The CRM's API paths are
+unchanged. New staff APIs live under `/api/admin/*` and community APIs under `/api/community/*`.
+
+### Permissions
+
+- **Administrative roles** are unchanged: `owner`, `editor` and `viewer` on `users.role`.
+- **Community-only logins** have `users.role = 'member'`, which is **not** an administrative role.
+  Student or Mentor is an *account type* on `community_accounts`, so choosing Mentor at signup grants
+  nothing in the CRM.
+- Every CRM route calls `requireStaff` (formerly `requireAuth`), so a member session gets **403**
+  everywhere in the CRM by default. That includes CRM routes added later. Team rosters, assignee
+  checks and the dashboard team count only include staff.
+- Community routes use two guards. `requireCommunityViewer` (an active member, or any staff user)
+  covers reading. `requireActiveCommunityMember` covers acting as a community identity, such as
+  messaging.
+- Staff join the community through an explicit **staff identity** (Profile, then "Create my
+  community profile"). It is labelled "ECenter staff" and is never linked to a contact. It leaves CRM
+  access exactly as it was. **No administrative route can read private conversations.**
+- Staff switch between the interfaces from the avatar menu ("Switch to community portal" /
+  "Switch to admin CRM").
+
+### Data separation
+
+| Data | Tables | Visible to |
+| --- | --- | --- |
+| Public profile: name, bio, LinkedIn, photo, major/year, role/company, scheduling link, topics | `community_profiles`, `community_profile_tags` | Signed-in members (allow-listed in `publicMemberOut`) |
+| Private member data: sign-in email, account state, resume | `users`, `community_accounts` | The member and staff |
+| Staff-only CRM data: contacts, notes, follow-ups, internal tags, organizations | Existing CRM tables | Staff only |
+
+Community matching topics (`interest_tags`) are a separate shared public taxonomy, created per
+tenant on first use. Entrepreneurship, Marketing, Technology, Product development, Finance,
+Fundraising, Design, Career development and a few others. They are never mixed with the CRM's
+internal contact tags.
+
+### Onboarding and CRM linking
+
+1. **Step 1:** Student or Mentor, name, email and password. This creates a *pending* account, signs
+   the person in and emails a verification link. Re-submitting the same email and password while the
+   account is still pending **resumes** that signup instead of failing or duplicating it.
+2. **Step 2:** everything is optional: bio, LinkedIn, photo, resume, topics, major and year or role
+   and company, and a mentor's scheduling link. "Skip for now" is always available.
+3. The account becomes **active** once the email is verified *and* onboarding is finished, in
+   either order.
+
+Linking only uses a **verified** email, normalised by trimming and lowercasing (no provider-specific
+rewriting):
+
+- exactly one matching contact: link it;
+- no match: create one contact (first name, last name, email and a one-line "how we connected");
+- several matches: flag it **Needs review** in Admin > Members. Nothing is chosen or merged
+  automatically.
+
+The system tag **"Created Account"** is added when the link is made. Every step is idempotent:
+
+- A new contact's id is derived from the user id and inserted with `INSERT OR IGNORE`.
+- The link only applies from the expected state.
+- A partial unique index stops one contact from being linked to two accounts.
+- The tag is added by a single conditional `json_insert`.
+
+If linking fails part-way, it stays `pending`. It is retried on the next `/api/auth/me`, or when
+staff click "Run matching now".
+
+**Field ownership.** Signup and profile edits never write an existing contact's fields.
+
+- **Staff-managed:** the contact's name, email, phone, status, relationship story, organizations,
+  notes, follow-ups, documents and internal tags (Student, Alumni, Mentor...).
+- **Member-managed:** the public profile, which staff see read-only in Admin > Members.
+- **System-managed:** "Created Account". Staff cannot add or remove it through the contact form or
+  bulk tagging; it is present exactly while a contact is linked.
+
+Contacts show the account status (active, pending or deactivated) as a badge, and the contact
+filters include "Community account".
+
+**Email changes** require the current password and a click on a link sent to the *new* address. The
+existing contact link is kept as it is. If the sign-in email then differs from the contact's email,
+Admin > Members says so rather than changing either one.
+
+### Feed, mentorship and messaging
+
+- **Posts** (Admin > Posts): owners and editors create, edit, publish, unpublish and archive posts;
+  viewers can read them. A post has a title, a plain-text body, an optional image (private R2,
+  signed URLs), an optional link, and optionally a community-visible event. The feed and
+  `GET /api/community/posts/:id` only return `published` posts, and an image link stops working when
+  its post is unpublished. The feed is keyset-paginated, newest first.
+- **Events** reach the portal only when staff tick "Show in the community portal"
+  (`community_visible`). Only the name, time and location are exposed.
+- **Recommendations** are deterministic (`services/matching.ts`):
+  - A student's "help with" topics count double and their interests count once. Both are matched
+    against everything a mentor lists.
+  - Ties break on name, then id.
+  - Every result carries a reason, e.g. "Can help with fundraising. Also matches your interests in
+    marketing."
+  - With no topics nothing is claimed as a match, though browsing still works.
+  - Deactivated mentors are excluded.
+- **Meetings:** a mentor with a valid https scheduling link shows **Book a meeting**, which opens
+  their page in a new tab. Otherwise **Request a meeting** opens Messages with an editable request
+  labelled "Meeting request". Nothing ever says a meeting is booked.
+- **Messages** are stored in D1.
+  - Only participants can open a conversation; anyone else gets a 404.
+  - Bodies are capped at 4,000 characters and rendered as plain text.
+  - Sends are idempotent through a client key.
+  - Rate limits: 20 sends per minute and 20 new conversations per hour.
+  - History is paginated, and read/unread is tracked per participant.
+  - The Worker has no realtime channel, so the page polls lightly while it is visible: every 8s for
+    the open thread, 20s for the list and 30s for the nav badge.
+
+### Deactivation ("Remove from community")
+
+Owners and editors use Admin > Members > *Remove from community*. Deactivation:
+
+- revokes every session of a community-only login (the session lookup also refuses deactivated
+  members);
+- removes the member from the directory and from recommendations;
+- blocks new messages to or from them.
+
+CRM records, notes, relationships and conversation history are all preserved. The other person in a
+conversation sees it labelled "No longer active". *Reactivate* restores access, and nothing is
+permanently deleted. Deleting the linked **contact** (the existing soft delete) releases the link
+and leaves the account alone.
+
+### Uploads
+
+Photos and post images (JPEG, PNG or WebP) and resumes (PDF, DOC or DOCX) are capped at 5 MB
+(`COMMUNITY_UPLOAD_MAX_BYTES`).
+
+- A file's leading bytes must match its declared type.
+- Files are stored in the private bucket under `customers/{id}/community/...`.
+- The Worker serves them only through short-lived HMAC-signed links, with `nosniff` and a sandbox
+  CSP.
+- Resume links are issued only to the owner and to staff, and staff downloads are audited.
+
+### Email verification and password reset
+
+Transactional email goes through **Cloudflare Email Service's `send_email` binding**, with no API
+keys. This needs external setup (see [Deployment](#deployment)). Until it is configured, signup
+still works but reports that the verification email could not be sent, and members cannot activate.
+
+Password reset (`/forgot-password`) works for staff and members. It always gives the same answer,
+so it cannot reveal which addresses have accounts. The link expires in an hour, and using it signs
+the person out everywhere.
+
+### Audit
+
+New audit actions:
+
+- `community.signup`, `community.email_verified`, `community.activated`
+- `community.linked`, `community.link_conflict`, `community.link_failed`, `community.unlinked`
+- `community.deactivated`, `community.reactivated`
+- `community.email_change_requested`, `community.email_changed`
+- `community.staff_identity_created`, `community.resume_download`
+- `post.create`, `post.update`, `post.publish`, `post.unpublish`, `post.archive`
+- `auth.password_reset_requested`, `auth.password_reset`
 
 ---
 
@@ -387,7 +587,8 @@ endpoints, and doing it directly keeps the token-refresh path explicit.
 npm test
 ```
 
-38 end-to-end tests call the real Worker's `fetch()` handler directly (no HTTP server) against a
+Two end-to-end suites, `worker/test/api.test.ts` (CRM) and `worker/test/community.test.ts`
+(community portal), call the real Worker's `fetch()` handler directly (no HTTP server) against a
 throwaway `node:sqlite`-backed D1 shim and a temp-directory R2 shim, reseeded first, so the suite is
 deterministic and repeatable. They cover authentication and account enumeration, **session
 revocation on logout and on team-member removal**, contact search/filter/sort/pagination, bulk
@@ -396,6 +597,23 @@ it), derived overdue status, recurrence scheduling and its duplicate guard, orga
 event-driven note creation, upload type rejection via the R2 binding, HMAC-signed download URLs,
 dashboard aggregates, global search, role enforcement, the last-owner guard, and CSV
 formula-injection escaping.
+
+The community suite uses a fake `EMAIL` binding to follow the emailed links. It covers:
+
+- **Permissions:** members are refused by every administrative API, and staff permissions are
+  unchanged.
+- **Linking:** a verified email links to the right existing contact without overwriting CRM data;
+  a new email gets exactly one contact and one "Created Account" tag; retried and concurrent signups
+  create no duplicates; ambiguous matches are flagged and resolved by editors only; the system tag
+  resists manual edits; and email changes keep the link.
+- **Privacy:** public profiles expose only allow-listed fields; resumes are available to the owner
+  and staff only; uploads are content-sniffed; URLs are validated.
+- **Feed:** only owners and editors can publish; drafts and unpublished posts stay private,
+  including their image links; the feed paginates; only community-visible events appear.
+- **Mentorship and messaging:** matching is deterministic and explained; messaging is
+  participant-only, with idempotent sends and pagination.
+- **Accounts:** deactivation revokes access and hides the member while keeping history; password
+  reset works.
 
 ---
 
@@ -418,6 +636,14 @@ npx wrangler d1 execute ecenter-crm --remote --file=./worker/src/db/schema.sql
 # Set the two required secrets.
 npx wrangler secret put JWT_SECRET
 npx wrangler secret put ENCRYPTION_KEY
+
+# Community portal email (verification + password reset):
+#   1. Onboard a sending domain to Cloudflare Email Service:
+#        npx wrangler email sending enable <your-domain>
+#   2. In wrangler.toml, uncomment the [[send_email]] binding (name = "EMAIL")
+#      and set MAIL_FROM to an address on that domain.
+#   3. Optionally set APP_URL so emailed links use your custom domain
+#      (they otherwise use the request's own origin).
 
 npm run build
 npx wrangler deploy

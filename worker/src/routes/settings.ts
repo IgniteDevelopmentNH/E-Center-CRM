@@ -5,7 +5,7 @@ import { hashPassword } from '../lib/password.ts';
 import { revokeAllSessionsForUser } from '../lib/session.ts';
 import { nowIso, todayDate } from '../lib/time.ts';
 import { oneOf, positiveInt, requiredEmail, requiredString } from '../lib/validate.ts';
-import { requireAuth, requireEditor, requireOwner } from '../middleware/auth.ts';
+import { requireStaff, requireEditor, requireOwner } from '../middleware/auth.ts';
 import { USER_ROLES, userOut } from '../records.ts';
 import type { Ctx, Router } from '../router.ts';
 import { ALLOWED_TYPES } from '../services/storage.ts';
@@ -15,14 +15,14 @@ const DIGEST_OPTIONS = ['off', 'daily', 'weekly'] as const;
 export function register(router: Router): void {
   /** Team roster. Every signed-in user can read it -- the assignee pickers need it. */
   router.get('/api/settings/users', async (ctx: Ctx) => {
-    const { customerId } = requireAuth(ctx);
+    const { customerId } = requireStaff(ctx);
     const rows = await ctx.db.all(
       `SELECT u.id, u.email, u.name, u.role, u.last_login_at, u.created_at,
               (SELECT COUNT(*) FROM tasks t
                 WHERE t.assigned_to = u.id AND t.deleted_at IS NULL AND t.status <> 'complete')
                 AS open_task_count
          FROM users u
-        WHERE u.customer_id = ? AND u.deleted_at IS NULL
+        WHERE u.customer_id = ? AND u.deleted_at IS NULL AND u.role IN ('owner', 'editor', 'viewer')
         ORDER BY LOWER(u.name) ASC`,
       [customerId],
     );
@@ -77,7 +77,7 @@ export function register(router: Router): void {
   router.put('/api/settings/users/:id', async (ctx: Ctx) => {
     const { customerId, userId } = requireOwner(ctx);
     const existing = await ctx.db.get<{ id: string; role: string }>(
-      `SELECT id, role FROM users WHERE id = ? AND customer_id = ? AND deleted_at IS NULL`,
+      `SELECT id, role FROM users WHERE id = ? AND customer_id = ? AND deleted_at IS NULL AND role IN ('owner', 'editor', 'viewer')`,
       [ctx.params.id!, customerId],
     );
     if (!existing) throw notFound('That team member no longer exists.');
@@ -127,7 +127,7 @@ export function register(router: Router): void {
     if (ctx.params.id === userId) throw badRequest('You cannot remove your own account.');
 
     const existing = await ctx.db.get<{ email: string; role: string }>(
-      `SELECT email, role FROM users WHERE id = ? AND customer_id = ? AND deleted_at IS NULL`,
+      `SELECT email, role FROM users WHERE id = ? AND customer_id = ? AND deleted_at IS NULL AND role IN ('owner', 'editor', 'viewer')`,
       [ctx.params.id!, customerId],
     );
     if (!existing) throw notFound('That team member no longer exists.');
@@ -162,7 +162,7 @@ export function register(router: Router): void {
 
   /** Preferences, tenant identity and the effective server configuration. */
   router.get('/api/settings', async (ctx: Ctx) => {
-    const { customerId, userId } = requireAuth(ctx);
+    const { customerId, userId } = requireStaff(ctx);
 
     const preferences = await ctx.db.get(`SELECT * FROM user_preferences WHERE user_id = ?`, [userId]);
     const customer = await ctx.db.get<{ name: string; slug: string; created_at: string }>(
@@ -211,7 +211,7 @@ export function register(router: Router): void {
   });
 
   router.put('/api/settings/preferences', async (ctx: Ctx) => {
-    const { customerId, userId } = requireAuth(ctx);
+    const { customerId, userId } = requireStaff(ctx);
     const body = await readJson(ctx.req);
     const emailDigest = oneOf(body.emailDigest, 'Email digest', DIGEST_OPTIONS, 'off');
     const reminderLeadDays = positiveInt(body.reminderLeadDays, 1, 30);

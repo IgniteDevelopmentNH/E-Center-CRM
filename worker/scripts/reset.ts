@@ -11,6 +11,16 @@ const dbPath = process.env.DEV_SQLITE_PATH || path.join(workerRoot, 'data', 'dev
 
 /** Child-first order so foreign keys stay satisfied while dropping rows. */
 const TABLES = [
+  'rate_limit_events',
+  'messages',
+  'conversation_members',
+  'conversations',
+  'posts',
+  'auth_tokens',
+  'community_profile_tags',
+  'interest_tags',
+  'community_profiles',
+  'community_accounts',
   'event_external_mapping',
   'calendar_sync_metadata',
   'microsoft_oauth_credentials',

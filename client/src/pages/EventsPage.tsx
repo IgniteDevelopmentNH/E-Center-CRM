@@ -566,7 +566,7 @@ function EventPanel({
                   <Avatar name={contact.fullName} tone="teal" />
                   <div className="min-w-0 flex-1">
                     <Link
-                      to={`/contacts?open=${contact.id}`}
+                      to={`/admin/contacts?open=${contact.id}`}
                       onClick={onClose}
                       className="block truncate font-semibold text-navy-800 hover:underline"
                     >

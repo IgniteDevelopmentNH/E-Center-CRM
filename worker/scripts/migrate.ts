@@ -16,9 +16,31 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const workerRoot = path.resolve(here, '..');
 const dbPath = process.env.DEV_SQLITE_PATH || path.join(workerRoot, 'data', 'dev.db');
 
+/**
+ * Columns added to tables that already existed. `CREATE TABLE IF NOT EXISTS`
+ * skips an existing table, so a dev database created before a column was added
+ * would never get it from schema.sql alone; add any that are missing first (the
+ * same ALTERs the dated files in src/db/migrations/ apply to production).
+ */
+const ADDED_COLUMNS: { table: string; column: string; definition: string }[] = [
+  { table: 'users', column: 'email_verified_at', definition: 'TEXT' },
+  { table: 'events', column: 'community_visible', definition: 'INTEGER NOT NULL DEFAULT 0' },
+];
+
 function main(): void {
   const schema = fs.readFileSync(path.join(workerRoot, 'src', 'db', 'schema.sql'), 'utf8');
   const db = createFakeD1(dbPath);
+  for (const { table, column, definition } of ADDED_COLUMNS) {
+    const tableExists = db._raw
+      .prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`)
+      .get(table);
+    if (!tableExists) continue;
+    const columns = db._raw.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+    if (!columns.some((c) => c.name === column)) {
+      db._raw.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+      console.log(`  added ${table}.${column}`);
+    }
+  }
   db._raw.exec(schema);
   db._close();
   console.log(`Schema applied (local dev D1 shim): ${dbPath}`);

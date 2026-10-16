@@ -13,7 +13,7 @@ import {
   requiredDate,
   requiredString,
 } from '../lib/validate.ts';
-import { requireAuth, requireEditor } from '../middleware/auth.ts';
+import { requireStaff, requireEditor } from '../middleware/auth.ts';
 import {
   REMINDER_OFFSETS,
   TASK_PRIORITIES,
@@ -98,7 +98,7 @@ function buildFilters(customerId: string, query: URLSearchParams) {
 
 export function register(router: Router): void {
   router.get('/api/tasks', async (ctx: Ctx) => {
-    const { customerId } = requireAuth(ctx);
+    const { customerId } = requireStaff(ctx);
     const { clause, params } = buildFilters(customerId, ctx.query);
     const sortKey = ctx.query.get('sort') ?? 'due';
     const orderBy = SORTS[sortKey] ?? SORTS.due;
@@ -143,7 +143,7 @@ export function register(router: Router): void {
   });
 
   router.get('/api/tasks/export.csv', async (ctx: Ctx) => {
-    const { customerId, userId } = requireAuth(ctx);
+    const { customerId, userId } = requireStaff(ctx);
     const { clause, params } = buildFilters(customerId, ctx.query);
     const rows = await ctx.db.all(`${SELECT_TASK} WHERE ${clause} ORDER BY ${SORTS.due}`, params);
     const tasks = rows.map(taskOut);
@@ -399,7 +399,7 @@ async function parseTask(db: Db, body: Record<string, unknown>, customerId: stri
   const assignedTo = optionalId(body.assignedTo, 'Assigned to');
   if (assignedTo) {
     const user = await db.get(
-      `SELECT id FROM users WHERE id = ? AND customer_id = ? AND deleted_at IS NULL`,
+      `SELECT id FROM users WHERE id = ? AND customer_id = ? AND deleted_at IS NULL AND role IN ('owner', 'editor', 'viewer')`,
       [assignedTo, customerId],
     );
     if (!user) throw badRequest('That team member was not found.', 'Assigned to');

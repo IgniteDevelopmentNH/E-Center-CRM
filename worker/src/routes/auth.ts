@@ -4,8 +4,10 @@ import { hashPassword, verifyPassword } from '../lib/password.ts';
 import { createSession, revokeSession } from '../lib/session.ts';
 import { nowIso } from '../lib/time.ts';
 import { requiredEmail, requiredString } from '../lib/validate.ts';
-import { requireAuth } from '../middleware/auth.ts';
+import { isStaffRole, requireSession } from '../middleware/auth.ts';
 import type { Ctx, Router } from '../router.ts';
+import { finalizeAccount } from '../services/community.ts';
+import { ownCommunityState } from './communityAccount.ts';
 
 interface UserRow {
   id: string;
@@ -43,6 +45,17 @@ export function register(router: Router): void {
       throw unauthorized('That email and password do not match.');
     }
 
+    // Checked only after the password, so it reveals nothing to a guesser.
+    if (user.role === 'member') {
+      const account = await ctx.db.get<{ status: string }>(
+        `SELECT status FROM community_accounts WHERE user_id = ?`,
+        [user.id],
+      );
+      if (account?.status === 'deactivated') {
+        throw unauthorized('This community account has been deactivated. Contact the ECenter if you think this is a mistake.');
+      }
+    }
+
     await ctx.db.run(`UPDATE users SET last_login_at = ? WHERE id = ?`, [nowIso(), user.id]);
     await audit(ctx.db, { customerId: user.customer_id, userId: user.id, action: 'auth.login', req: ctx.req });
 
@@ -51,12 +64,12 @@ export function register(router: Router): void {
 
     return jsonResponse({
       token,
-      user: { id: user.id, email: user.email, name: user.name, role: user.role },
+      user: { id: user.id, email: user.email, name: user.name, role: user.role, isStaff: isStaffRole(user.role) },
     });
   });
 
   router.get('/api/auth/me', async (ctx: Ctx) => {
-    const auth = requireAuth(ctx);
+    const auth = requireSession(ctx);
     const user = await ctx.db.get<Record<string, unknown>>(
       `SELECT u.id, u.email, u.name, u.role, u.last_login_at, c.name AS customer_name, c.slug AS customer_slug
          FROM users u JOIN customers c ON c.id = u.customer_id
@@ -64,28 +77,42 @@ export function register(router: Router): void {
       [auth.userId],
     );
     if (!user) throw unauthorized();
+
+    // Resumable signup: if an earlier request was interrupted between verifying
+    // the email and linking the CRM contact, this picks it back up (idempotent).
+    const pending = await ctx.db.get(
+      `SELECT 1 AS pending FROM community_accounts ca JOIN users u ON u.id = ca.user_id
+        WHERE ca.user_id = ? AND ca.status <> 'deactivated' AND u.email_verified_at IS NOT NULL
+          AND (ca.link_state = 'pending' AND ca.account_type <> 'staff'
+               OR (ca.status = 'pending' AND ca.onboarding_completed_at IS NOT NULL))`,
+      [auth.userId],
+    );
+    if (pending) await finalizeAccount(ctx, auth.userId);
+
     return jsonResponse({
       user: {
         id: user.id,
         email: user.email,
         name: user.name,
         role: user.role,
+        isStaff: isStaffRole(String(user.role)),
         lastLoginAt: user.last_login_at,
       },
       customer: { name: user.customer_name, slug: user.customer_slug },
+      community: await ownCommunityState(ctx, auth.userId),
     });
   });
 
   /** New in the Worker rewrite: a DB-backed session can actually be revoked. */
   router.post('/api/auth/logout', async (ctx: Ctx) => {
-    const auth = requireAuth(ctx);
+    const auth = requireSession(ctx);
     if (ctx.token) await revokeSession(ctx.db, ctx.token);
     await audit(ctx.db, { customerId: auth.customerId, userId: auth.userId, action: 'auth.logout', req: ctx.req });
     return jsonResponse({ ok: true });
   });
 
   router.post('/api/auth/change-password', async (ctx: Ctx) => {
-    const auth = requireAuth(ctx);
+    const auth = requireSession(ctx);
     const body = await readJson(ctx.req);
     const current = requiredString(body.currentPassword, 'Current password', { max: 200 });
     const next = requiredString(body.newPassword, 'New password', { max: 200 });

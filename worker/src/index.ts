@@ -5,13 +5,18 @@ import { errorToResponse, jsonResponse } from './lib/http.ts';
 import { getSessionUser } from './lib/session.ts';
 import { Router } from './router.ts';
 import type { Ctx } from './router.ts';
+import { register as registerAdminCommunity } from './routes/adminCommunity.ts';
+import { register as registerAdminPosts } from './routes/adminPosts.ts';
 import { register as registerAuth } from './routes/auth.ts';
 import { register as registerBootstrap } from './routes/bootstrap.ts';
 import { register as registerCalendar } from './routes/calendar.ts';
+import { register as registerCommunityAccount } from './routes/communityAccount.ts';
+import { register as registerCommunityContent } from './routes/communityContent.ts';
 import { register as registerContacts } from './routes/contacts.ts';
 import { register as registerDashboard } from './routes/dashboard.ts';
 import { register as registerDocuments } from './routes/documents.ts';
 import { register as registerEvents } from './routes/events.ts';
+import { register as registerMessages } from './routes/messages.ts';
 import { register as registerNotes } from './routes/notes.ts';
 import { register as registerOrganizations } from './routes/organizations.ts';
 import { register as registerSearch } from './routes/search.ts';
@@ -31,7 +36,14 @@ router
   .use(registerDocuments)
   .use(registerSettings)
   .use(registerCalendar)
-  .use(registerBootstrap);
+  .use(registerBootstrap)
+  // Administrative additions (staff only).
+  .use(registerAdminPosts)
+  .use(registerAdminCommunity)
+  // Community portal (students, mentors, staff community identities).
+  .use(registerCommunityAccount)
+  .use(registerCommunityContent)
+  .use(registerMessages);
 
 function corsHeaders(origin: string | null): Record<string, string> {
   return {

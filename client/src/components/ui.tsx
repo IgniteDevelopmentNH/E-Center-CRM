@@ -114,6 +114,9 @@ export const TASK_STATUS_TONES: Record<string, Tone> = {
   complete: 'green',
 };
 
+/** Community account status: active / pending / deactivated. */
+export const ACCOUNT_STATUS_TONES: Record<string, Tone> = { active: 'green', pending: 'amber', deactivated: 'slate' };
+
 export const PRIORITY_TONES: Record<string, Tone> = { high: 'red', medium: 'amber', low: 'slate' };
 
 export const EVENT_TYPE_TONES: Record<string, Tone> = {

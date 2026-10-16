@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import { ApiError, api } from '../lib/api.ts';
-import { DEFAULT_EVENT_LOCATION } from '../lib/constants.ts';
+import { DEFAULT_EVENT_LOCATION, SYSTEM_TAG_CREATED_ACCOUNT } from '../lib/constants.ts';
 import {
   CONTACT_STATUSES,
   CONTACT_TAGS,
@@ -112,7 +112,9 @@ export function ContactForm({
   const [email, setEmail] = useState(initial?.email ?? '');
   const [phone, setPhone] = useState(initial?.phone ?? '');
   const [howWeConnected, setHowWeConnected] = useState(initial?.howWeConnected ?? '');
-  const [tags, setTags] = useState<string[]>(initial?.tags ?? []);
+  // "Created Account" is system-managed (it follows the community account link), so it is
+  // not offered for editing here; the server keeps it accurate on save.
+  const [tags, setTags] = useState<string[]>((initial?.tags ?? []).filter((tag) => tag !== SYSTEM_TAG_CREATED_ACCOUNT));
   const [organizationIds, setOrganizationIds] = useState<string[]>(() => {
     const fromContact = initial?.organizations?.map((org) => org.id) ?? [];
     if (lockOrganizationId && !fromContact.includes(lockOrganizationId)) {
@@ -208,6 +210,11 @@ export function ContactForm({
 
       <Field label="Tags" error={errorFor('Tags')}>
         <TagPicker value={tags} onChange={setTags} suggestions={CONTACT_TAGS} />
+        {initial?.tags.includes(SYSTEM_TAG_CREATED_ACCOUNT) && (
+          <p className="mt-1 text-xs text-slate-500">
+            “{SYSTEM_TAG_CREATED_ACCOUNT}” is applied automatically while this contact has a community account.
+          </p>
+        )}
       </Field>
 
       {isStudentFounder && (
@@ -725,6 +732,7 @@ export function EventForm({
   const [location, setLocation] = useState(initial?.location ?? DEFAULT_EVENT_LOCATION);
   const [description, setDescription] = useState(initial?.description ?? '');
   const [followupNotes, setFollowupNotes] = useState(initial?.followupNotes ?? '');
+  const [communityVisible, setCommunityVisible] = useState(initial?.communityVisible ?? false);
   const [contactIds, setContactIds] = useState<string[]>([]);
 
   const { data: contactData } = useApi<{ contacts: Contact[] }>('/contacts?limit=200&sort=name');
@@ -745,6 +753,7 @@ export function EventForm({
               location,
               description,
               followupNotes,
+              communityVisible,
               ...(initial ? {} : { contactIds }),
             };
             const response = initial
@@ -801,6 +810,17 @@ export function EventForm({
       <Field label="Description" error={errorFor('Description')}>
         <TextArea value={description} onChange={(event) => setDescription(event.target.value)} rows={3} />
       </Field>
+
+      <div>
+        <Checkbox
+          label="Show in the community portal"
+          checked={communityVisible}
+          onChange={setCommunityVisible}
+        />
+        <p className="-mt-1 text-xs text-slate-500">
+          Students and mentors see the name, time and location only. Leave unchecked for internal events.
+        </p>
+      </div>
 
       {!initial && (
         <Field

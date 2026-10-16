@@ -1,12 +1,12 @@
 import { jsonResponse } from '../lib/http.ts';
-import { requireAuth } from '../middleware/auth.ts';
+import { requireStaff } from '../middleware/auth.ts';
 import { contactOut, eventOut, noteOut, organizationOut, taskOut } from '../records.ts';
 import type { Ctx, Router } from '../router.ts';
 
 /** Global search across contacts, organizations, notes, tasks and events. */
 export function register(router: Router): void {
   router.get('/api/search', async (ctx: Ctx) => {
-    const { customerId } = requireAuth(ctx);
+    const { customerId } = requireStaff(ctx);
     const term = (ctx.query.get('q') ?? '').trim().toLowerCase();
     if (term.length < 2) {
       return jsonResponse({ query: term, contacts: [], organizations: [], notes: [], tasks: [], events: [] });

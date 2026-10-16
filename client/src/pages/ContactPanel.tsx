@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { ContactForm, NoteForm, TaskForm } from '../components/forms.tsx';
 import { ConfirmDialog, Modal, SlideOver } from '../components/overlays.tsx';
 import {
+  ACCOUNT_STATUS_TONES,
   CONTACT_STATUS_TONES,
   Chip,
   EmptyState,
@@ -203,6 +204,22 @@ export function ContactPanel({
             </p>
           )}
 
+          {contact.communityAccount && (
+            <section>
+              <SectionHeader title="Community account" />
+              <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 p-3 text-sm">
+                <StatusChip value={contact.communityAccount.status} tones={ACCOUNT_STATUS_TONES} />
+                <span className="text-slate-600">{humanise(contact.communityAccount.accountType)} in the community portal</span>
+                <Link
+                  to={`/admin/members?open=${contact.communityAccount.userId}`}
+                  className="ml-auto font-semibold text-teal-700 hover:underline"
+                >
+                  Manage account
+                </Link>
+              </div>
+            </section>
+          )}
+
           <section>
             <SectionHeader title="How we connected" />
             {contact.howWeConnected ? (
@@ -254,7 +271,7 @@ export function ContactPanel({
                       {contact.organizations.map((org) => (
                         <li key={org.id}>
                           <Link
-                            to={`/organizations?open=${org.id}`}
+                            to={`/admin/organizations?open=${org.id}`}
                             className="text-teal-700 hover:underline"
                             onClick={onClose}
                           >

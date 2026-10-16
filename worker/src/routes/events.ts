@@ -4,13 +4,14 @@ import { badRequest, jsonResponse, notFound, readJson } from '../lib/http.ts';
 import { newId } from '../lib/ids.ts';
 import { formatDisplayDate, nowIso } from '../lib/time.ts';
 import {
+  flag,
   oneOf,
   optionalString,
   optionalTimestamp,
   requiredString,
   requiredTimestamp,
 } from '../lib/validate.ts';
-import { requireAuth, requireEditor } from '../middleware/auth.ts';
+import { requireStaff, requireEditor } from '../middleware/auth.ts';
 import { EVENT_TYPES, contactOut, eventOut } from '../records.ts';
 import type { Ctx, Router } from '../router.ts';
 import { createSystemNote } from './notes.ts';
@@ -34,6 +35,8 @@ function parseEvent(body: Record<string, unknown>) {
     location: optionalString(body.location, 'Location', { max: 200 }),
     description: optionalString(body.description, 'Description', { max: 5000 }),
     followupNotes: optionalString(body.followupNotes, 'Follow-up notes', { max: 5000 }),
+    // Explicit opt-in: staff events stay out of the community portal unless flagged.
+    communityVisible: flag(body.communityVisible),
   };
 }
 
@@ -84,7 +87,7 @@ async function addAttendee(
 
 export function register(router: Router): void {
   router.get('/api/events', async (ctx: Ctx) => {
-    const { customerId } = requireAuth(ctx);
+    const { customerId } = requireStaff(ctx);
     const where: string[] = ['e.customer_id = ?', 'e.deleted_at IS NULL'];
     const params: SqlParam[] = [customerId];
 
@@ -123,7 +126,7 @@ export function register(router: Router): void {
   });
 
   router.get('/api/events/:id', async (ctx: Ctx) => {
-    const { customerId } = requireAuth(ctx);
+    const { customerId } = requireStaff(ctx);
     const row = await ctx.db.get(
       `${SELECT_EVENT} WHERE e.id = ? AND e.customer_id = ? AND e.deleted_at IS NULL`,
       [ctx.params.id!, customerId],
@@ -157,8 +160,8 @@ export function register(router: Router): void {
     await ctx.db.run(
       `INSERT INTO events
          (id, customer_id, name, starts_at, ends_at, event_type, location, description,
-          followup_notes, created_at, updated_at, created_by, last_edited_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          followup_notes, community_visible, created_at, updated_at, created_by, last_edited_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
         customerId,
@@ -169,6 +172,7 @@ export function register(router: Router): void {
         fields.location,
         fields.description,
         fields.followupNotes,
+        fields.communityVisible,
         timestamp,
         timestamp,
         userId,
@@ -204,7 +208,7 @@ export function register(router: Router): void {
     await ctx.db.run(
       `UPDATE events SET
          name = ?, starts_at = ?, ends_at = ?, event_type = ?, location = ?, description = ?,
-         followup_notes = ?, updated_at = ?, last_edited_by = ?
+         followup_notes = ?, community_visible = ?, updated_at = ?, last_edited_by = ?
        WHERE id = ? AND customer_id = ?`,
       [
         fields.name,
@@ -214,6 +218,7 @@ export function register(router: Router): void {
         fields.location,
         fields.description,
         fields.followupNotes,
+        fields.communityVisible,
         nowIso(),
         userId,
         ctx.params.id!,

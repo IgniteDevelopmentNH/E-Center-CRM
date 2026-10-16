@@ -6,7 +6,7 @@ import { badRequest, jsonResponse, notFound, readJson } from '../lib/http.ts';
 import { newId } from '../lib/ids.ts';
 import { nowIso } from '../lib/time.ts';
 import { oneOf, positiveInt, requiredString, tagList } from '../lib/validate.ts';
-import { requireAuth, requireEditor } from '../middleware/auth.ts';
+import { requireStaff, requireEditor } from '../middleware/auth.ts';
 import { NOTE_TYPES, noteOut } from '../records.ts';
 import type { Ctx, Router } from '../router.ts';
 
@@ -83,7 +83,7 @@ function buildFilters(customerId: string, query: URLSearchParams) {
 
 export function register(router: Router): void {
   router.get('/api/notes', async (ctx: Ctx) => {
-    const { customerId } = requireAuth(ctx);
+    const { customerId } = requireStaff(ctx);
     const { clause, params } = buildFilters(customerId, ctx.query);
     const order = ctx.query.get('order') === 'oldest' ? 'ASC' : 'DESC';
     const limit = positiveInt(ctx.query.get('limit'), 25, 200);
@@ -104,7 +104,7 @@ export function register(router: Router): void {
 
   /** Note tags in use, for the filter dropdown. */
   router.get('/api/notes/facets', async (ctx: Ctx) => {
-    const { customerId } = requireAuth(ctx);
+    const { customerId } = requireStaff(ctx);
     const rows = await ctx.db.all<{ tags: string }>(
       `SELECT tags FROM notes WHERE customer_id = ? AND deleted_at IS NULL`,
       [customerId],
@@ -127,7 +127,7 @@ export function register(router: Router): void {
   });
 
   router.get('/api/notes/export.csv', async (ctx: Ctx) => {
-    const { customerId, userId } = requireAuth(ctx);
+    const { customerId, userId } = requireStaff(ctx);
     const { clause, params } = buildFilters(customerId, ctx.query);
     const rows = await ctx.db.all(`${SELECT_NOTE} WHERE ${clause} ORDER BY n.created_at DESC`, params);
     const notes = rows.map(noteOut);

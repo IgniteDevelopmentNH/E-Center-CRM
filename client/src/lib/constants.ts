@@ -55,3 +55,6 @@ export const USER_ROLES = [
 ] as const;
 
 export const DEFAULT_EVENT_LOCATION = 'Madbury Commons';
+
+/** System-managed contact tag: present exactly while a contact is linked to a community account. */
+export const SYSTEM_TAG_CREATED_ACCOUNT = 'Created Account';

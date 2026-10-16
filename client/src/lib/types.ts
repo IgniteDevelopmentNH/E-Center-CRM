@@ -60,6 +60,8 @@ export interface Contact {
   noteCount: number;
   openTaskCount: number;
   documentCount: number;
+  /** Linked community account, if this contact signed up to the portal. */
+  communityAccount: { userId: string; accountType: string; status: AccountStatus } | null;
 }
 
 export interface Note {
@@ -127,6 +129,7 @@ export interface CrmEvent {
   location: string | null;
   description: string | null;
   followupNotes: string | null;
+  communityVisible: boolean;
   attendeeCount: number;
   externalId: string | null;
   createdAt: string;
@@ -161,7 +164,9 @@ export interface SessionUser {
   id: string;
   email: string;
   name: string;
-  role: UserRole;
+  /** owner | editor | viewer are staff; 'member' is a community-only login. */
+  role: UserRole | 'member';
+  isStaff: boolean;
 }
 
 export interface Paged {
@@ -246,4 +251,169 @@ export interface AuditLogEntry {
   metadata: string | null;
   ipAddress: string | null;
   createdAt: string;
+}
+
+/* -------------------------------------------------------- community portal -- */
+
+export type AccountType = 'student' | 'mentor' | 'staff';
+export type AccountStatus = 'pending' | 'active' | 'deactivated';
+
+export interface InterestTag {
+  slug: string;
+  label: string;
+}
+
+/** The caller's own community record (private: includes email and resume). */
+export interface CommunityState {
+  userId: string;
+  accountType: AccountType;
+  status: AccountStatus;
+  onboardingCompleted: boolean;
+  emailVerified: boolean;
+  email: string;
+  pendingEmail: string | null;
+  profile: {
+    firstName: string;
+    lastName: string;
+    bio: string | null;
+    linkedinUrl: string | null;
+    photoUrl: string | null;
+    major: string | null;
+    graduationYear: number | null;
+    roleTitle: string | null;
+    company: string | null;
+    schedulingUrl: string | null;
+    interests: InterestTag[];
+    help: InterestTag[];
+  };
+  resume: { fileName: string; size: number; uploadedAt: string } | null;
+}
+
+/** How a member appears to other members. Public fields only. */
+export interface PublicMember {
+  id: string;
+  firstName: string;
+  lastName: string;
+  fullName: string;
+  accountType: AccountType;
+  bio: string | null;
+  linkedinUrl: string | null;
+  photoUrl: string | null;
+  major: string | null;
+  graduationYear: number | null;
+  roleTitle: string | null;
+  company: string | null;
+  schedulingUrl: string | null;
+  interests: InterestTag[];
+  help: InterestTag[];
+  available: boolean;
+}
+
+export type MembersResponse = Paged & { members: PublicMember[] };
+
+export interface CommunityEvent {
+  id: string;
+  name: string;
+  startsAt: string;
+  endsAt: string | null;
+  location: string | null;
+}
+
+export interface FeedPost {
+  id: string;
+  title: string;
+  body: string;
+  linkUrl: string | null;
+  imageUrl: string | null;
+  publishedAt: string;
+  authorName: string;
+  event: CommunityEvent | null;
+}
+
+export interface Recommendation {
+  mentor: PublicMember;
+  reason: string | null;
+  sharedTags: InterestTag[];
+}
+
+export interface ConversationSummary {
+  id: string;
+  other: PublicMember | null;
+  lastMessage: { body: string; mine: boolean } | null;
+  lastMessageAt: string | null;
+  unreadCount: number;
+}
+
+export interface ChatMessage {
+  id: string;
+  conversationId: string;
+  senderId: string;
+  mine: boolean;
+  body: string;
+  kind: 'text' | 'meeting_request';
+  clientKey: string;
+  createdAt: string;
+}
+
+export interface AdminPost {
+  id: string;
+  title: string;
+  body: string;
+  linkUrl: string | null;
+  imageUrl: string | null;
+  eventId: string | null;
+  eventName: string | null;
+  eventStartsAt: string | null;
+  eventCommunityVisible: boolean;
+  status: 'draft' | 'published' | 'archived';
+  publishedAt: string | null;
+  authorName: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type LinkState = 'pending' | 'linked' | 'conflict' | 'unlinked' | 'not_applicable';
+
+export interface AdminCommunityAccount {
+  userId: string;
+  fullName: string;
+  email: string;
+  emailVerified: boolean;
+  accountType: AccountType;
+  status: AccountStatus;
+  onboardingCompleted: boolean;
+  linkState: LinkState;
+  contactId: string | null;
+  contactName: string | null;
+  contactEmail: string | null;
+  emailDiffersFromContact: boolean;
+  hasResume: boolean;
+  resumeName: string | null;
+  createdAt: string;
+  activatedAt: string | null;
+  lastLoginAt: string | null;
+  deactivatedAt: string | null;
+  deactivatedByName: string | null;
+  deactivationReason: string | null;
+  profile: {
+    bio: string | null;
+    roleTitle: string | null;
+    company: string | null;
+    major: string | null;
+    graduationYear: number | null;
+    linkedinUrl: string | null;
+    schedulingUrl: string | null;
+  };
+  interests?: InterestTag[];
+  help?: InterestTag[];
+}
+
+export interface LinkCandidate {
+  id: string;
+  fullName: string;
+  email: string;
+  status: string;
+  organizationName: string | null;
+  createdAt: string;
+  linkedToAnotherAccount: boolean;
 }

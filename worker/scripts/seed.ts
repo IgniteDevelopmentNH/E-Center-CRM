@@ -16,6 +16,7 @@ import type { Db } from '../src/db/driver.ts';
 import { newId } from '../src/lib/ids.ts';
 import { hashPassword } from '../src/lib/password.ts';
 import { addDaysToDate, nowIso, todayDate } from '../src/lib/time.ts';
+import { CREATED_ACCOUNT_TAG, ensureDefaultTags } from '../src/services/community.ts';
 // @ts-expect-error -- plain JS dev shim, no type declarations.
 import { createFakeD1 } from '../dev/fakeD1.mjs';
 
@@ -39,6 +40,15 @@ function isoDaysAhead(days: number, hour = 17, minute = 0): string {
 }
 
 const CUSTOMER_SCOPED_TABLES = [
+  'messages',
+  'conversation_members',
+  'conversations',
+  'posts',
+  'auth_tokens',
+  'community_profile_tags',
+  'interest_tags',
+  'community_profiles',
+  'community_accounts',
   'event_external_mapping',
   'calendar_sync_metadata',
   'microsoft_oauth_credentials',
@@ -770,16 +780,214 @@ export async function seedDemoData(
   return { customerId };
 }
 
+interface DemoMember {
+  email: string;
+  type: 'student' | 'mentor';
+  first: string;
+  last: string;
+  bio: string;
+  major?: string;
+  year?: number;
+  role?: string;
+  company?: string;
+  scheduling?: string;
+  interests: string[];
+  help: string[];
+}
+
+const DEMO_MEMBERS: DemoMember[] = [
+  {
+    email: 'maya.chen@example.org',
+    type: 'student',
+    first: 'Maya',
+    last: 'Chen',
+    bio: 'Junior building a campus food-waste startup. Looking for go-to-market advice.',
+    major: 'Business Administration',
+    year: 2027,
+    interests: ['entrepreneurship', 'marketing', 'social-impact'],
+    help: ['fundraising', 'marketing'],
+  },
+  {
+    // Matches an existing seeded contact, so it demonstrates linking.
+    email: 'priya.raghavan@example.com',
+    type: 'mentor',
+    first: 'Priya',
+    last: 'Raghavan',
+    bio: 'Product leader who has launched three B2B SaaS products. Happy to review pitch decks.',
+    role: 'VP of Product',
+    company: 'Northline Software',
+    scheduling: 'https://calendly.com/example-priya',
+    interests: ['product-development', 'technology', 'entrepreneurship'],
+    help: ['fundraising', 'product-development'],
+  },
+  {
+    email: 'jordan.lee@example.org',
+    type: 'mentor',
+    first: 'Jordan',
+    last: 'Lee',
+    bio: 'Brand and growth marketer and UNH alum. I enjoy helping students sharpen their positioning.',
+    role: 'Marketing Director',
+    company: 'Seacoast Brands',
+    interests: ['marketing', 'design', 'career-development'],
+    help: ['marketing', 'sales'],
+  },
+];
+
+/**
+ * LOCAL DEV ONLY: a few community members, feed posts and community-visible
+ * events so the portal has something to show. Not used by the test suite
+ * (which creates members through the real signup API) and never run against
+ * production.
+ */
+export async function seedCommunityDemo(db: Db, customerId: string): Promise<void> {
+  const timestamp = nowIso();
+  await ensureDefaultTags(db, customerId);
+  const tagIds = new Map(
+    (await db.all<{ id: string; slug: string }>(`SELECT id, slug FROM interest_tags WHERE customer_id = ?`, [customerId])).map(
+      (tag) => [tag.slug, tag.id],
+    ),
+  );
+  const passwordHash = await hashPassword(DEMO_PASSWORD);
+  const lisa = (await db.get<{ id: string }>(`SELECT id FROM users WHERE email = 'lisa@unh.edu'`))!.id;
+
+  // Upcoming public-facing events are shown to the community; the rest stay internal.
+  await db.run(
+    `UPDATE events SET community_visible = 1
+      WHERE customer_id = ? AND starts_at >= ? AND event_type IN ('workshop', 'ideathon', 'speaker_series', 'networking')`,
+    [customerId, timestamp],
+  );
+
+  for (const member of DEMO_MEMBERS) {
+    const userId = newId();
+    const existing = await db.get<{ id: string }>(
+      `SELECT id FROM contacts WHERE customer_id = ? AND lower(trim(email)) = ? AND deleted_at IS NULL`,
+      [customerId, member.email],
+    );
+    const contactId = existing?.id ?? newId();
+    if (!existing) {
+      await db.run(
+        `INSERT INTO contacts (id, customer_id, first_name, last_name, email, how_we_connected, tags, status,
+                               is_student_founder, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, '[]', 'active', 0, ?, ?)`,
+        [contactId, customerId, member.first, member.last, member.email, 'Joined the ECenter community portal.', timestamp, timestamp],
+      );
+    }
+    await db.batch([
+      {
+        sql: `INSERT INTO users (id, customer_id, email, password_hash, name, role, email_verified_at, created_at, updated_at)
+              VALUES (?, ?, ?, ?, ?, 'member', ?, ?, ?)`,
+        params: [userId, customerId, member.email, passwordHash, `${member.first} ${member.last}`, timestamp, timestamp, timestamp],
+      },
+      {
+        sql: `INSERT INTO community_accounts (user_id, customer_id, account_type, status, onboarding_completed_at, activated_at,
+                                              contact_id, link_state, linked_at, created_account_tagged_at, created_at, updated_at)
+              VALUES (?, ?, ?, 'active', ?, ?, ?, 'linked', ?, ?, ?, ?)`,
+        params: [userId, customerId, member.type, timestamp, timestamp, contactId, timestamp, timestamp, timestamp, timestamp],
+      },
+      {
+        sql: `INSERT INTO community_profiles (user_id, customer_id, first_name, last_name, bio, major, graduation_year,
+                                              role_title, company, scheduling_url, updated_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        params: [
+          userId,
+          customerId,
+          member.first,
+          member.last,
+          member.bio,
+          member.major ?? null,
+          member.year ?? null,
+          member.role ?? null,
+          member.company ?? null,
+          member.scheduling ?? null,
+          timestamp,
+        ],
+      },
+      {
+        sql: `UPDATE contacts SET tags = json_insert(tags, '$[#]', ?)
+               WHERE id = ? AND NOT EXISTS (SELECT 1 FROM json_each(contacts.tags) WHERE value = ?)`,
+        params: [CREATED_ACCOUNT_TAG, contactId, CREATED_ACCOUNT_TAG],
+      },
+      ...(['interests', 'help'] as const).flatMap((kind) =>
+        member[kind].map((slug) => ({
+          sql: `INSERT INTO community_profile_tags (user_id, tag_id, kind, customer_id, created_at) VALUES (?, ?, ?, ?, ?)`,
+          params: [userId, tagIds.get(slug)!, kind === 'interests' ? 'interest' : 'help', customerId, timestamp],
+        })),
+      ),
+    ]);
+  }
+
+  const visibleEvent = await db.get<{ id: string }>(
+    `SELECT id FROM events WHERE customer_id = ? AND community_visible = 1
+      ORDER BY CASE event_type WHEN 'ideathon' THEN 0 ELSE 1 END, starts_at ASC LIMIT 1`,
+    [customerId],
+  );
+  const posts = [
+    {
+      title: 'Welcome to the ECenter community',
+      body:
+        'This is where students and mentors connect. Complete your profile and add your interests so we can recommend mentors who match what you are working on.\n\nQuestions? Message the ECenter team from the Network page.',
+      status: 'published',
+      daysAgo: 6,
+      eventId: null,
+      link: null,
+    },
+    {
+      title: 'Ideathon registration is open',
+      body: 'Bring an idea, find a team, and pitch it in a weekend. Mentors will be on hand both days for feedback.',
+      status: 'published',
+      daysAgo: 2,
+      eventId: visibleEvent?.id ?? null,
+      link: 'https://www.unh.edu/ecenter',
+    },
+    {
+      title: 'Spring mentor spotlight',
+      body: 'Not published yet: only staff can see this, in Admin > Posts.',
+      status: 'draft',
+      daysAgo: 0,
+      eventId: null,
+      link: null,
+    },
+  ];
+  for (const post of posts) {
+    const at = isoDaysAgo(post.daysAgo, 10, 0);
+    await db.run(
+      `INSERT INTO posts (id, customer_id, title, body, link_url, event_id, status, published_at, author_id,
+                          created_at, updated_at, created_by, last_edited_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        newId(),
+        customerId,
+        post.title,
+        post.body,
+        post.link,
+        post.eventId,
+        post.status,
+        post.status === 'published' ? at : null,
+        lisa,
+        at,
+        at,
+        lisa,
+        lisa,
+      ],
+    );
+  }
+}
+
 async function main(): Promise<void> {
   const fakeD1 = createFakeD1(dbPath);
   const db = createD1Db(fakeD1 as never);
   const { customerId } = await seedDemoData(db, CUSTOMER_SLUG, CUSTOMER_NAME);
+  await seedCommunityDemo(db, customerId);
   fakeD1._close();
 
   console.log('Sample data loaded.');
   console.log(`  customer: ${CUSTOMER_NAME} (${customerId})`);
   console.log(`  sign in:  lisa@unh.edu / ${DEMO_PASSWORD}   (owner)`);
   console.log(`            bella@unh.edu / ${DEMO_PASSWORD}  (editor)`);
+  console.log('  community portal (local demo data only):');
+  console.log(`            maya.chen@example.org / ${DEMO_PASSWORD}       (student)`);
+  console.log(`            priya.raghavan@example.com / ${DEMO_PASSWORD}  (mentor, linked to an existing contact)`);
+  console.log(`            jordan.lee@example.org / ${DEMO_PASSWORD}      (mentor)`);
 }
 
 const isEntrypoint =
