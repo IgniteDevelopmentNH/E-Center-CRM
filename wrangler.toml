@@ -52,8 +52,8 @@ COMMUNITY_UPLOAD_MAX_BYTES = "5242880"
 # on a domain onboarded to Cloudflare Email Service (see README "Email"), and
 # the [[send_email]] binding below must be enabled. Until both are set, signup
 # still works but reports that the verification email could not be sent.
-# MAIL_FROM = "noreply@your-onboarded-domain.edu"
-# MAIL_FROM_NAME = "UNH ECenter"
+MAIL_FROM = "ecenter-noreply@ignitedevelopment.net"
+MAIL_FROM_NAME = "UNH ECenter"
 
 # Secrets (never in this file — set with `wrangler secret put NAME`):
 #   JWT_SECRET            openssl rand -hex 32
@@ -71,10 +71,9 @@ COMMUNITY_UPLOAD_MAX_BYTES = "5242880"
 #   BOOTSTRAP_OWNER_EMAIL / BOOTSTRAP_OWNER_NAME / BOOTSTRAP_OWNER_PASSWORD
 #   BOOTSTRAP_EDITOR_EMAIL / BOOTSTRAP_EDITOR_NAME / BOOTSTRAP_EDITOR_PASSWORD  (optional)
 
-# Cloudflare Email Service binding for transactional email. Uncomment AFTER
-# onboarding the sending domain: `npx wrangler email sending enable <domain>`.
-# [[send_email]]
-# name = "EMAIL"
+# Cloudflare Email Service binding for transactional email.
+[[send_email]]
+name = "EMAIL"
 
 [observability]
 enabled = true
