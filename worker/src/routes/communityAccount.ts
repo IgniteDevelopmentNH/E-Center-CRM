@@ -1,6 +1,6 @@
 import type { Db } from '../db/driver.ts';
 import { audit } from '../lib/audit.ts';
-import { consumeToken, issueToken } from '../lib/authTokens.ts';
+import { consumeToken, findUsedToken, issueToken } from '../lib/authTokens.ts';
 import {
   normaliseEmail,
   optionalGraduationYear,
@@ -307,8 +307,22 @@ export function register(router: Router): void {
   /** Public: the link in the verification email. */
   router.post('/api/auth/verify-email', async (ctx: Ctx) => {
     const body = await readJson(ctx.req);
-    const consumed = await consumeToken(ctx.db, typeof body.token === 'string' ? body.token : '', 'verify_email');
-    if (!consumed) throw badRequest('That link is invalid or has expired. Sign in to request a new one.');
+    const token = typeof body.token === 'string' ? body.token : '';
+    const consumed = await consumeToken(ctx.db, token, 'verify_email');
+    if (!consumed) {
+      // Opened a second time: if this exact link already confirmed the address, say so.
+      const used = await findUsedToken(ctx.db, token, 'verify_email');
+      if (used) {
+        const current = await ctx.db.get<{ email: string; email_verified_at: string | null }>(
+          `SELECT email, email_verified_at FROM users WHERE id = ? AND deleted_at IS NULL`,
+          [used.userId],
+        );
+        if (current?.email_verified_at && normaliseEmail(current.email) === normaliseEmail(used.email)) {
+          return jsonResponse({ ok: true, alreadyVerified: true });
+        }
+      }
+      throw badRequest('That link is invalid or has expired. Sign in to request a new one.');
+    }
 
     const user = await ctx.db.get<{ email: string }>(`SELECT email FROM users WHERE id = ? AND deleted_at IS NULL`, [
       consumed.userId,
@@ -336,8 +350,18 @@ export function register(router: Router): void {
   /** Public: confirms a NEW address. Keeps the existing CRM link exactly as it was. */
   router.post('/api/auth/confirm-email-change', async (ctx: Ctx) => {
     const body = await readJson(ctx.req);
-    const consumed = await consumeToken(ctx.db, typeof body.token === 'string' ? body.token : '', 'change_email');
-    if (!consumed) throw badRequest('That link is invalid or has expired.');
+    const token = typeof body.token === 'string' ? body.token : '';
+    const consumed = await consumeToken(ctx.db, token, 'change_email');
+    if (!consumed) {
+      const used = await findUsedToken(ctx.db, token, 'change_email');
+      if (used) {
+        const current = await ctx.db.get<{ email: string }>(`SELECT email FROM users WHERE id = ? AND deleted_at IS NULL`, [used.userId]);
+        if (current && normaliseEmail(current.email) === normaliseEmail(used.email)) {
+          return jsonResponse({ ok: true, alreadyVerified: true });
+        }
+      }
+      throw badRequest('That link is invalid or has expired.');
+    }
 
     const clash = await ctx.db.get(`SELECT id FROM users WHERE LOWER(email) = ? AND id <> ?`, [
       consumed.email,

@@ -79,3 +79,22 @@ export async function consumeToken(db: Db, token: string, purpose: TokenPurpose)
   if (!claimed) return null;
   return { id: row.id, userId: row.user_id, customerId: row.customer_id, email: row.email };
 }
+
+/**
+ * Looks up a token that has ALREADY been used. Lets a link that is opened a
+ * second time (a double click, an email app's preview, a security scanner
+ * that opened it first) report "already confirmed" instead of an error.
+ * Never consumes anything and never returns an unused token.
+ */
+export async function findUsedToken(
+  db: Db,
+  token: string,
+  purpose: TokenPurpose,
+): Promise<{ userId: string; email: string } | null> {
+  if (!token || token.length > 200) return null;
+  const row = await db.get<{ user_id: string; email: string }>(
+    `SELECT user_id, email FROM auth_tokens WHERE token_hash = ? AND purpose = ? AND used_at IS NOT NULL`,
+    [await hash(token), purpose],
+  );
+  return row ? { userId: row.user_id, email: row.email } : null;
+}

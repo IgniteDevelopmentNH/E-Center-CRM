@@ -12,6 +12,7 @@ export function VerifyEmailPage() {
   const token = params.get('token') ?? '';
   const isChange = params.get('type') === 'change';
   const [state, setState] = useState<'working' | 'done' | 'error'>(token ? 'working' : 'error');
+  const [already, setAlready] = useState(false);
   const [message, setMessage] = useState(token ? '' : 'This link is missing its token.');
   const sent = useRef(false);
 
@@ -20,8 +21,9 @@ export function VerifyEmailPage() {
     if (!token || sent.current) return;
     sent.current = true;
     api
-      .post(isChange ? '/auth/confirm-email-change' : '/auth/verify-email', { token })
-      .then(async () => {
+      .post<{ alreadyVerified?: boolean }>(isChange ? '/auth/confirm-email-change' : '/auth/verify-email', { token })
+      .then(async (result) => {
+        setAlready(!!result.alreadyVerified);
         setState('done');
         await refresh().catch(() => undefined);
       })
@@ -41,7 +43,11 @@ export function VerifyEmailPage() {
         <div role="status">
           <h2 className="text-2xl font-bold text-navy-800">{isChange ? 'Email updated' : 'Email confirmed'}</h2>
           <p className="mt-2 text-sm text-slate-600">
-            {isChange ? 'Use your new address the next time you sign in.' : 'Thanks! Your email address is confirmed.'}
+            {already
+              ? 'This link was already used, and your email is confirmed. You are all set.'
+              : isChange
+                ? 'Use your new address the next time you sign in.'
+                : 'Thanks! Your email address is confirmed.'}
           </p>
           <Link to={next.to} className="btn-primary mt-6">
             {next.label}

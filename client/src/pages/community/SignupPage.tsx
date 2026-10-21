@@ -371,6 +371,14 @@ function VerifyNotice({
   );
   const [busy, setBusy] = useState(false);
 
+  // If they confirm from another device or tab, move on without needing a click.
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void onRefresh().catch(() => undefined);
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [onRefresh]);
+
   async function resend() {
     setBusy(true);
     try {

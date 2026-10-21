@@ -282,7 +282,10 @@ describe('signup links accounts to CRM contacts', () => {
 
     const token = lastLinkTo(email);
     await api('POST', '/api/auth/verify-email', { token }, null);
-    assert.equal((await api('POST', '/api/auth/verify-email', { token }, null)).status, 400, 'links are single-use');
+    // Single-use: a second open changes nothing, it only reports that the address is already confirmed.
+    const reused = await api('POST', '/api/auth/verify-email', { token }, null);
+    assert.equal(reused.status, 200);
+    assert.equal(reused.body.alreadyVerified, true);
 
     await Promise.all([
       api('POST', '/api/community/onboarding/complete', undefined, again.body.token),

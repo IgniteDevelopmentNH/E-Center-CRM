@@ -448,3 +448,21 @@ describe('profiles and topics', () => {
     assert.equal(saved.status, 200);
   });
 });
+
+describe('verification links opened twice', () => {
+  it('a second open of a used link reports "already confirmed" instead of an error', async () => {
+    const created = await api('POST', '/api/community/signup', { accountType: 'student', firstName: 'Tw', lastName: 'Ice', email: 'twice@example.org', password: 'longpassword1' }, null);
+    assert.equal(created.status, 201);
+    const message = [...outbox].reverse().find((m) => m.to === 'twice@example.org' && m.text.includes('/verify-email?'))!;
+    const token = /token=([a-f0-9]+)/.exec(message.text)![1]!;
+
+    const first = await api('POST', '/api/auth/verify-email', { token }, null);
+    assert.deepEqual(first.body, { ok: true });
+    const second = await api('POST', '/api/auth/verify-email', { token }, null);
+    assert.equal(second.status, 200);
+    assert.equal(second.body.alreadyVerified, true);
+
+    // A token that was never issued is still rejected.
+    assert.equal((await api('POST', '/api/auth/verify-email', { token: 'f'.repeat(64) }, null)).status, 400);
+  });
+});
