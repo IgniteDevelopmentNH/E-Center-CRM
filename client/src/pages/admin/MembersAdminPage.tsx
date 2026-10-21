@@ -7,7 +7,7 @@ import type { Tone } from '../../components/ui.tsx';
 import { ApiError, api, buildQuery, openSignedUrl } from '../../lib/api.ts';
 import { formatDate, formatDateTime } from '../../lib/format.ts';
 import { useApi, useDebounced } from '../../lib/hooks.ts';
-import type { AccountStatus, AdminCommunityAccount, LinkCandidate, LinkState } from '../../lib/types.ts';
+import type { AccountStatus, AdminCommunityAccount, LinkCandidate, LinkState, PostPermission } from '../../lib/types.ts';
 import { useAuth } from '../../state/AuthContext.tsx';
 import { useToast } from '../../state/ToastContext.tsx';
 
@@ -19,6 +19,53 @@ const LINK_LABELS: Record<LinkState, { label: string; tone: Tone }> = {
   unlinked: { label: 'Not linked', tone: 'slate' },
   not_applicable: { label: 'Staff identity', tone: 'navy' },
 };
+
+const POSTING_LABELS: Record<PostPermission, string> = {
+  none: 'Cannot post',
+  approval: 'Posts with approval',
+  direct: 'Posts without approval',
+};
+
+/** Who can post, per member; "default" follows the account type. */
+function PostingControl({
+  account,
+  canEdit,
+  busy,
+  onSave,
+}: {
+  account: AdminCommunityAccount;
+  canEdit: boolean;
+  busy: boolean;
+  onSave: (value: string) => void;
+}) {
+  const typeDefault = account.accountType === 'mentor' ? 'Posts with approval' : account.accountType === 'staff' ? 'Posts without approval' : 'Cannot post';
+  const options = [
+    { value: 'default', label: `Default for ${accountTypeLabel(account.accountType).toLowerCase()}s (${typeDefault.toLowerCase()})` },
+    { value: 'none', label: 'Cannot post' },
+    { value: 'approval', label: 'Can post with approval' },
+    { value: 'direct', label: 'Can post without approval' },
+  ];
+  return (
+    <section className="space-y-2">
+      <h3 className="text-xs font-bold uppercase tracking-wide text-navy-800">Posting</h3>
+      {canEdit ? (
+        <Select
+          value={account.postPermissionOverride ?? 'default'}
+          options={options}
+          disabled={busy}
+          aria-label="Posting permission"
+          onChange={(event) => onSave(event.target.value)}
+        />
+      ) : (
+        <p>{POSTING_LABELS[account.postPermission]}</p>
+      )}
+      <p className="text-xs text-slate-500">
+        Currently: <span className="font-semibold">{POSTING_LABELS[account.postPermission]}</span>. People who can post get a
+        “Posts” section in the community portal. Posts that need approval wait in Admin &gt; Posts.
+      </p>
+    </section>
+  );
+}
 
 export function AccountStatusChip({ status }: { status: AccountStatus }) {
   return <Chip tone={ACCOUNT_STATUS_TONES[status]}>{STATUS_LABELS[status]}</Chip>;
@@ -101,6 +148,7 @@ export function MembersAdminPage() {
                 <th className="px-4 py-3 font-bold">Member</th>
                 <th className="px-4 py-3 font-bold">Type</th>
                 <th className="px-4 py-3 font-bold">Status</th>
+                <th className="px-4 py-3 font-bold">Posting</th>
                 <th className="px-4 py-3 font-bold">CRM contact</th>
                 <th className="px-4 py-3 font-bold">Joined</th>
               </tr>
@@ -116,6 +164,10 @@ export function MembersAdminPage() {
                   </td>
                   <td className="px-4 py-3">{accountTypeLabel(account.accountType)}</td>
                   <td className="px-4 py-3"><AccountStatusChip status={account.status} /></td>
+                  <td className="px-4 py-3 text-slate-600">
+                    {POSTING_LABELS[account.postPermission]}
+                    {account.postPermissionOverride && <span className="ml-1 text-xs text-slate-400">(custom)</span>}
+                  </td>
                   <td className="px-4 py-3">
                     {account.contactId ? (
                       <Link to={`/admin/contacts?open=${account.contactId}`} className="font-semibold text-teal-700 hover:underline">
@@ -155,6 +207,23 @@ function AccountPanel({ userId, onClose, onChanged }: { userId: string; onClose:
   const [busy, setBusy] = useState(false);
   const [deactivating, setDeactivating] = useState(false);
   const [reason, setReason] = useState('');
+
+  async function setPermission(value: string) {
+    setBusy(true);
+    try {
+      const response = await api.put<{ account: AdminCommunityAccount; candidates: LinkCandidate[] }>(
+        `/admin/community/accounts/${userId}/permissions`,
+        { postPermission: value },
+      );
+      setData(() => response);
+      onChanged();
+      toast.success('Posting permission updated.');
+    } catch (caught) {
+      toast.error(caught instanceof ApiError ? caught.message : 'That did not work.');
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function act(path: string, body?: unknown, success?: string) {
     setBusy(true);
@@ -233,6 +302,13 @@ function AccountPanel({ userId, onClose, onChanged }: { userId: string; onClose:
               )}
             </dl>
           </section>
+
+          <PostingControl
+            account={account}
+            canEdit={canEdit}
+            busy={busy}
+            onSave={(value) => setPermission(value)}
+          />
 
           {account.accountType !== 'staff' && (
             <section className="space-y-2">

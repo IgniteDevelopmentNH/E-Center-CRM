@@ -13,7 +13,11 @@ import { SettingsPage } from './pages/SettingsPage.tsx';
 import { TasksPage } from './pages/TasksPage.tsx';
 import { MembersAdminPage } from './pages/admin/MembersAdminPage.tsx';
 import { PostsAdminPage } from './pages/admin/PostsAdminPage.tsx';
+import { EventDetailPage } from './pages/community/EventDetailPage.tsx';
 import { FeedPage } from './pages/community/FeedPage.tsx';
+import { MyPostsPage } from './pages/community/MyPostsPage.tsx';
+import { PostDetailPage } from './pages/community/PostDetailPage.tsx';
+import { UnsubscribePage } from './pages/community/UnsubscribePage.tsx';
 import { ForgotPasswordPage, ResetPasswordPage } from './pages/community/PasswordPages.tsx';
 import { LandingPage } from './pages/community/LandingPage.tsx';
 import { MemberProfilePage } from './pages/community/MemberProfilePage.tsx';
@@ -124,6 +128,7 @@ export function App() {
       <Route path="/verify-email" element={<VerifyEmailPage />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
+      <Route path="/unsubscribe" element={<UnsubscribePage />} />
 
       {/* Administrative CRM (staff only) */}
       <Route
@@ -144,6 +149,9 @@ export function App() {
       <Route path="/network" element={community(<NetworkPage />)} />
       <Route path="/messages" element={community(<MessagesPage />)} />
       <Route path="/members/:id" element={community(<MemberProfilePage />)} />
+      <Route path="/posts/:id" element={community(<PostDetailPage />)} />
+      <Route path="/events/:id" element={community(<EventDetailPage />)} />
+      <Route path="/my-posts" element={community(<MyPostsPage />)} />
       <Route
         path="/profile"
         element={

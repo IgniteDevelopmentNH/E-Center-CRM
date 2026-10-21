@@ -4,7 +4,7 @@ import { formatBytes } from '../lib/format.ts';
 import type { AccountType, CommunityState } from '../lib/types.ts';
 import { useToast } from '../state/ToastContext.tsx';
 import { MemberAvatar, TopicPicker } from './community.tsx';
-import { Field, TextArea, TextInput } from './ui.tsx';
+import { Checkbox, Field, TextArea, TextInput } from './ui.tsx';
 
 export interface ProfileDraft {
   firstName: string;
@@ -271,6 +271,18 @@ export function ResumeUpload({
     }
   }
 
+  async function setVisibility(isPublic: boolean) {
+    setBusy(true);
+    try {
+      onUpdated((await api.put<{ community: CommunityState }>('/community/profile/resume-visibility', { public: isPublic })).community);
+      toast.success(isPublic ? 'Your resume now shows on your profile.' : 'Your resume is private again.');
+    } catch (caught) {
+      toast.error(caught instanceof ApiError ? caught.message : 'That did not work.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div>
       <p className="label">Resume</p>
@@ -299,8 +311,19 @@ export function ResumeUpload({
           />
         </label>
       )}
+      {community.resume && (
+        <Checkbox
+          label="Show my resume on my profile, so other members can view it"
+          checked={community.resume.public}
+          onChange={setVisibility}
+          disabled={busy}
+        />
+      )}
       <p className="mt-1 text-xs text-slate-500">
-        Optional. PDF or Word, up to 5 MB. Private: only you and ECenter staff can see it.
+        Optional. PDF or Word, up to 5 MB.{' '}
+        {community.resume?.public
+          ? 'Visible to signed-in community members on your profile.'
+          : 'Private unless you choose to show it: only you and ECenter staff can see it.'}
       </p>
       {error && <p className="mt-1 text-xs font-semibold text-urgent" role="alert">{error}</p>}
     </div>

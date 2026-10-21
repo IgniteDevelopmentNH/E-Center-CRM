@@ -18,6 +18,7 @@ import { useApi, useDebounced } from '../lib/hooks.ts';
 import type { Contact, Note, NotesResponse, TeamMember } from '../lib/types.ts';
 import { useAuth } from '../state/AuthContext.tsx';
 import { useToast } from '../state/ToastContext.tsx';
+import { Combobox } from '../components/Combobox.tsx';
 
 export function NotesPage() {
   const { canEdit } = useAuth();
@@ -190,15 +191,16 @@ export function NotesPage() {
           <div className="mt-4 grid gap-3 border-t border-slate-200 pt-4 sm:grid-cols-2 lg:grid-cols-3">
             <label className="block">
               <span className="label">Contact</span>
-              <Select
+              <Combobox
                 value={contactId}
                 options={(contactData?.contacts ?? []).map((contact) => ({
                   value: contact.id,
                   label: contact.fullName,
+                  sublabel: contact.organizationName,
                 }))}
-                includeAll
-                allLabel="Everyone"
-                onChange={(event) => setContactId(event.target.value)}
+                emptyOption={{ value: 'all', label: 'Everyone' }}
+                placeholder="Search contacts"
+                onChange={setContactId}
               />
             </label>
             <label className="block">
@@ -226,12 +228,12 @@ export function NotesPage() {
             </label>
             <label className="block">
               <span className="label">Logged by</span>
-              <Select
+              <Combobox
                 value={createdBy}
                 options={(users?.users ?? []).map((user) => ({ value: user.id, label: user.name }))}
-                includeAll
-                allLabel="Anyone"
-                onChange={(event) => setCreatedBy(event.target.value)}
+                emptyOption={{ value: 'all', label: 'Anyone' }}
+                placeholder="Search team"
+                onChange={setCreatedBy}
               />
             </label>
             <label className="block">

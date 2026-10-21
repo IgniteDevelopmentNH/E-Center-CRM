@@ -41,7 +41,14 @@ export type AuditAction =
   | 'post.update'
   | 'post.publish'
   | 'post.unpublish'
-  | 'post.archive';
+  | 'post.archive'
+  | 'post.approve'
+  | 'post.reject'
+  | 'post.delete'
+  | 'post.restore'
+  | 'post.notify'
+  | 'event.notify'
+  | 'community.permissions_changed';
 
 interface AuditInput {
   customerId: string;

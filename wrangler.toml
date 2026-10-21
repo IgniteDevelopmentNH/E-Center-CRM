@@ -48,6 +48,10 @@ UPLOAD_MAX_BYTES = "52428800"
 JWT_TTL_SECONDS = "43200"
 JWT_TTL_REMEMBER_SECONDS = "2592000"
 COMMUNITY_UPLOAD_MAX_BYTES = "5242880"
+# Absolute base for links in emails. Required for notification emails, which
+# are sent from the scheduled handler where there is no request to read the
+# host from. Change this if the app moves to a custom domain.
+APP_URL = "https://e-center-crm.joshuab8236.workers.dev"
 # Sender for community verification / password-reset email. Must be an address
 # on a domain onboarded to Cloudflare Email Service (see README "Email"), and
 # the [[send_email]] binding below must be enabled. Until both are set, signup
@@ -74,6 +78,10 @@ MAIL_FROM_NAME = "UNH ECenter"
 # Cloudflare Email Service binding for transactional email.
 [[send_email]]
 name = "EMAIL"
+
+# Sends queued community notification emails (services/notifications.ts).
+[triggers]
+crons = ["* * * * *"]
 
 [observability]
 enabled = true

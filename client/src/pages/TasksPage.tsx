@@ -20,6 +20,7 @@ import { useApi, useDebounced } from '../lib/hooks.ts';
 import type { Task, TasksResponse, TeamMember } from '../lib/types.ts';
 import { useAuth } from '../state/AuthContext.tsx';
 import { useToast } from '../state/ToastContext.tsx';
+import { Combobox } from '../components/Combobox.tsx';
 
 const STATUS_FILTERS = [
   { value: 'incomplete', label: 'Still open' },
@@ -191,7 +192,7 @@ export function TasksPage() {
             onChange={(event) => setStatus(event.target.value)}
             aria-label="Filter by status"
           />
-          <Select
+          <Combobox
             value={assignedTo}
             options={[
               ...(user ? [{ value: user.id, label: 'Assigned to me' }] : []),
@@ -199,10 +200,10 @@ export function TasksPage() {
                 .filter((member) => member.id !== user?.id)
                 .map((member) => ({ value: member.id, label: member.name })),
             ]}
-            includeAll
-            allLabel="Anyone"
-            onChange={(event) => setAssignedTo(event.target.value)}
-            aria-label="Filter by assignee"
+            emptyOption={{ value: 'all', label: 'Anyone' }}
+            placeholder="Filter by assignee"
+            onChange={setAssignedTo}
+            ariaLabel="Filter by assignee"
           />
           <Select
             value={priority}

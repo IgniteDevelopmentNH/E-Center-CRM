@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { ContentHistorySection } from './admin/ContentHistorySection.tsx';
 import { ConfirmDialog, Modal } from '../components/overlays.tsx';
 import {
   Chip,
@@ -91,6 +92,8 @@ export function SettingsPage() {
           </Detail>
         </dl>
       </section>
+
+      <ContentHistorySection canEdit={canEdit} />
 
       {canEdit && <AuditSection />}
 

@@ -262,6 +262,16 @@ npx wrangler d1 execute ecenter-crm --remote \
   --file=./worker/src/db/migrations/2026-10-12-community-portal.sql
 ```
 
+`2026-10-20-community-v2.sql` adds member posting with approval, comments, likes, @mentions, RSVPs,
+public resumes and notification emails. It is also purely additive: new columns with safe defaults
+(existing posts stay staff posts, nobody's resume becomes public) plus new tables. Apply it after the
+first one and **before** deploying the matching build:
+
+```bash
+npx wrangler d1 execute ecenter-crm --remote \
+  --file=./worker/src/db/migrations/2026-10-20-community-v2.sql
+```
+
 Locally, `npm run migrate` adds any missing columns to an older dev database before applying
 `schema.sql`, so an existing `worker/data/dev.db` upgrades in place.
 
@@ -495,7 +505,69 @@ New audit actions:
 - `community.email_change_requested`, `community.email_changed`
 - `community.staff_identity_created`, `community.resume_download`
 - `post.create`, `post.update`, `post.publish`, `post.unpublish`, `post.archive`
+- `post.approve`, `post.reject`, `post.delete`, `post.restore`, `post.notify`, `event.notify`
+- `community.permissions_changed`
 - `auth.password_reset_requested`, `auth.password_reset`
+
+### Member posts, comments and likes
+
+- **Posting permission** is set per person in Admin > Members > *Posting*:
+  - **Cannot post**: the default for students.
+  - **Post with approval**: the default for mentors. Posts wait in Admin > Posts > *Awaiting approval*
+    until an owner or editor approves or rejects them. A rejection can include a note, which the
+    author sees.
+  - **Post without approval**: posts publish immediately.
+  - **Default** follows the account type.
+- Anyone who can post gets a **Posts** item in the portal navigation (`/my-posts`), where they create,
+  edit and take down their own posts. Posts can include a link, an image, and event details with an
+  optional "I'll be there!" RSVP.
+- With approval-required posting, **editing a published post sends it back for review**, so approved
+  content cannot be swapped out quietly.
+- **Comments** have one level of replies. A comment can be removed by its author, by the post's
+  author, or by any staff owner/editor; staff can do this even without a community identity.
+- **Likes** count once per member.
+- **@mentions** work in posts and comments: type `@` to search members. The server re-checks every
+  mention and turns a forged one into plain text. Mentioned members get an email once the post is
+  published.
+- **History.** Every edit, takedown, restore, approval and rejection keeps the previous version.
+  Removed comments are kept too. Staff can review all of this in Admin > Settings > *Community
+  content history* and restore taken-down posts from there.
+
+### Events in the portal
+
+- *Upcoming events* (the right column on desktop, a swipeable strip on phones) lists two things:
+  CRM events marked "Show in the community portal", and published event posts.
+- Each CRM event can have a **community description** (shown instead of the staff description) and
+  **"I'll be there!" RSVPs**.
+- Staff see who RSVP'd in the event panel, and in Admin > Posts for event posts.
+
+### Notification emails
+
+Member notification emails go through the same email binding as verification:
+
+| Email | When | Preference |
+| --- | --- | --- |
+| New direct message | The message is still unread 2 minutes later. One email per unread streak. | Messages |
+| @mention | The post or comment that mentions you is published | Mentions |
+| Announcement | Staff click **Email members** on a published post or community event | Announcements |
+
+Every email has a one-click unsubscribe link (with `List-Unsubscribe` headers). Members can also
+change these preferences on their profile. Signup step 2 asks about announcement emails, ticked by
+default.
+
+**How emails are sent.** Requests only add emails to a queue (the `email_outbox` table). A **cron
+trigger** (`[triggers] crons = ["* * * * *"]` in `wrangler.toml`) sends up to 25 a minute.
+
+- Before sending, the cron job re-checks each email: the message is still unread, the post is still
+  published, and the member is still active and opted in.
+- Retries and double clicks never send twice, and failures are retried with backoff.
+- Emails need absolute links, so **`APP_URL` must be set** in `wrangler.toml`.
+- Locally, the dev server runs the same job every 30 seconds and prints emails to its console.
+
+### Resumes
+
+Resumes stay private by default. A member can tick *Show my resume on my profile*; their profile then
+shows a **View resume** button to other signed-in members, behind the same short-lived signed links.
 
 ---
 

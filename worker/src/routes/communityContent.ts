@@ -2,7 +2,6 @@ import type { SqlParam } from '../db/driver.ts';
 import { audit } from '../lib/audit.ts';
 import { badRequest, jsonResponse, notFound, unauthorized } from '../lib/http.ts';
 import { signValue, verifyValue } from '../lib/signedToken.ts';
-import { nowIso } from '../lib/time.ts';
 import { positiveInt } from '../lib/validate.ts';
 import { requireCommunityViewer } from '../middleware/auth.ts';
 import type { Ctx, Router } from '../router.ts';
@@ -16,50 +15,6 @@ import { readObject } from '../services/storage.ts';
  * columns -- no CRM table is read except `events`, and only rows staff have
  * flagged community_visible, through their public columns.
  */
-
-const POST_IMAGE_TTL_SECONDS = 60 * 60 * 6;
-
-export async function postImageUrl(
-  ctx: Ctx,
-  postId: string,
-  imageKey: unknown,
-  scope: 'community' | 'staff',
-): Promise<string | null> {
-  if (!imageKey) return null;
-  const token = await signValue({ k: 'post', p: postId, s: scope }, ctx.config.tokenSecret, POST_IMAGE_TTL_SECONDS);
-  return `/api/community/files/post-image/${postId}?token=${encodeURIComponent(token)}`;
-}
-
-function publicEventOut(row: Record<string, unknown>, prefix = '') {
-  return {
-    id: String(row[`${prefix}id`]),
-    name: String(row[`${prefix}name`]),
-    startsAt: String(row[`${prefix}starts_at`]),
-    endsAt: row[`${prefix}ends_at`] ? String(row[`${prefix}ends_at`]) : null,
-    location: row[`${prefix}location`] ? String(row[`${prefix}location`]) : null,
-  };
-}
-
-async function feedPostOut(ctx: Ctx, row: Record<string, unknown>) {
-  return {
-    id: String(row.id),
-    title: String(row.title),
-    body: String(row.body),
-    linkUrl: row.link_url ? String(row.link_url) : null,
-    imageUrl: await postImageUrl(ctx, String(row.id), row.image_key, 'community'),
-    publishedAt: String(row.published_at),
-    authorName: row.author_name ? String(row.author_name) : 'UNH ECenter',
-    // Only shown when the linked event is (still) flagged community-visible.
-    event: row.ev_id ? publicEventOut(row, 'ev_') : null,
-  };
-}
-
-const SELECT_FEED_POST = `
-  SELECT p.id, p.title, p.body, p.link_url, p.image_key, p.published_at, u.name AS author_name,
-         e.id AS ev_id, e.name AS ev_name, e.starts_at AS ev_starts_at, e.ends_at AS ev_ends_at, e.location AS ev_location
-    FROM posts p
-    LEFT JOIN users u ON u.id = p.author_id
-    LEFT JOIN events e ON e.id = p.event_id AND e.deleted_at IS NULL AND e.community_visible = 1`;
 
 /** Shared directory query: active, onboarded members only, public columns only. */
 function directoryWhere(ctx: Ctx, customerId: string, viewerId: string) {
@@ -138,57 +93,6 @@ function fileResponse(body: ArrayBuffer, type: string, disposition: string): Res
 }
 
 export function register(router: Router): void {
-  /** Published posts only, newest first, keyset-paginated. Drafts/archived never leave the server. */
-  router.get('/api/community/feed', async (ctx: Ctx) => {
-    const { auth } = await requireCommunityViewer(ctx);
-    const limit = positiveInt(ctx.query.get('limit'), 10, 30);
-    const where = [`p.customer_id = ?`, `p.status = 'published'`, `p.deleted_at IS NULL`, `p.published_at IS NOT NULL`];
-    const params: SqlParam[] = [auth.customerId];
-
-    const cursor = ctx.query.get('cursor');
-    if (cursor) {
-      const [publishedAt, id] = cursor.split('|');
-      if (!publishedAt || !id) throw badRequest('Invalid cursor.');
-      where.push('(p.published_at < ? OR (p.published_at = ? AND p.id < ?))');
-      params.push(publishedAt, publishedAt, id);
-    }
-
-    const rows = await ctx.db.all<Record<string, unknown>>(
-      `${SELECT_FEED_POST} WHERE ${where.join(' AND ')} ORDER BY p.published_at DESC, p.id DESC LIMIT ?`,
-      [...params, limit + 1],
-    );
-    const page = rows.slice(0, limit);
-    const last = page[page.length - 1];
-    return jsonResponse({
-      posts: await Promise.all(page.map((row) => feedPostOut(ctx, row))),
-      nextCursor: rows.length > limit && last ? `${String(last.published_at)}|${String(last.id)}` : null,
-    });
-  });
-
-  router.get('/api/community/posts/:id', async (ctx: Ctx) => {
-    const { auth } = await requireCommunityViewer(ctx);
-    const row = await ctx.db.get<Record<string, unknown>>(
-      `${SELECT_FEED_POST} WHERE p.id = ? AND p.customer_id = ? AND p.status = 'published' AND p.deleted_at IS NULL`,
-      [ctx.params.id!, auth.customerId],
-    );
-    if (!row) throw notFound('That post is not available.');
-    return jsonResponse({ post: await feedPostOut(ctx, row) });
-  });
-
-  /** Upcoming events staff have explicitly marked community-visible. */
-  router.get('/api/community/events', async (ctx: Ctx) => {
-    const { auth } = await requireCommunityViewer(ctx);
-    const limit = positiveInt(ctx.query.get('limit'), 5, 20);
-    const rows = await ctx.db.all<Record<string, unknown>>(
-      `SELECT id, name, starts_at, ends_at, location FROM events
-        WHERE customer_id = ? AND deleted_at IS NULL AND community_visible = 1
-          AND COALESCE(ends_at, starts_at) >= ?
-        ORDER BY starts_at ASC LIMIT ?`,
-      [auth.customerId, nowIso(), limit],
-    );
-    return jsonResponse({ events: rows.map((row) => publicEventOut(row)) });
-  });
-
   router.get('/api/community/members', async (ctx: Ctx) => {
     const { auth } = await requireCommunityViewer(ctx);
     return jsonResponse(await listMembers(ctx, auth.customerId, auth.userId));
@@ -205,6 +109,20 @@ export function register(router: Router): void {
     if (!row) throw notFound('That member profile is not available.');
     const tags = await loadTags(ctx.db, [String(row.user_id)]);
     return jsonResponse({ member: await publicMemberOut(ctx, row, tags.get(String(row.user_id))) });
+  });
+
+  /** A member's resume, only when they have chosen to make it public. */
+  router.get('/api/community/members/:id/resume', async (ctx: Ctx) => {
+    const { auth } = await requireCommunityViewer(ctx);
+    const row = await ctx.db.get<{ resume_key: string | null }>(
+      `SELECT ca.resume_key FROM community_accounts ca JOIN users u ON u.id = ca.user_id
+        WHERE ca.user_id = ? AND ca.customer_id = ? AND ca.status = 'active' AND ca.resume_public = 1
+          AND u.deleted_at IS NULL`,
+      [ctx.params.id!, auth.customerId],
+    );
+    if (!row?.resume_key) throw notFound('That resume is not available.');
+    const token = await signValue({ k: 'resume', u: ctx.params.id! }, ctx.config.tokenSecret, ctx.config.downloadUrlTtlSeconds);
+    return jsonResponse({ url: `/api/community/files/resume/${ctx.params.id!}?token=${encodeURIComponent(token)}` });
   });
 
   /** Browse all active mentors (search + tag filter). */

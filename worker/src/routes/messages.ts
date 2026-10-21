@@ -8,6 +8,7 @@ import { oneOf, positiveInt, requiredString } from '../lib/validate.ts';
 import { requireActiveCommunityMember } from '../middleware/auth.ts';
 import type { Ctx, Router } from '../router.ts';
 import { PUBLIC_PROFILE_COLUMNS, loadTags, publicMemberOut } from '../services/community.ts';
+import { enqueueMessageNotification } from '../services/notifications.ts';
 
 /**
  * Persistent one-to-one messaging between community identities.
@@ -244,6 +245,13 @@ export function register(router: Router): void {
       `SELECT * FROM messages WHERE sender_id = ? AND client_key = ?`,
       [auth.userId, clientKey],
     );
+    // Emailed only if it is still unread a couple of minutes from now (see services/notifications.ts).
+    await enqueueMessageNotification(ctx.db, {
+      customerId: auth.customerId,
+      conversationId: participant.id,
+      senderId: auth.userId,
+      recipientId: participant.other_id,
+    });
     return jsonResponse({ message: messageOut(saved!, auth.userId), duplicate: String(saved!.id) !== id }, { status: 201 });
   });
 

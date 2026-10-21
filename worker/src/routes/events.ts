@@ -14,12 +14,14 @@ import {
 import { requireStaff, requireEditor } from '../middleware/auth.ts';
 import { EVENT_TYPES, contactOut, eventOut } from '../records.ts';
 import type { Ctx, Router } from '../router.ts';
+import { enqueueAnnouncement } from '../services/notifications.ts';
 import { createSystemNote } from './notes.ts';
 
 const SELECT_EVENT = `
   SELECT e.*,
          m.external_id,
-         (SELECT COUNT(*) FROM event_attendees a WHERE a.event_id = e.id) AS attendee_count
+         (SELECT COUNT(*) FROM event_attendees a WHERE a.event_id = e.id) AS attendee_count,
+         (SELECT COUNT(*) FROM event_rsvps r WHERE r.target_type = 'event' AND r.target_id = e.id) AS community_rsvp_count
     FROM events e
     LEFT JOIN event_external_mapping m ON m.event_id = e.id`;
 
@@ -37,6 +39,9 @@ function parseEvent(body: Record<string, unknown>) {
     followupNotes: optionalString(body.followupNotes, 'Follow-up notes', { max: 5000 }),
     // Explicit opt-in: staff events stay out of the community portal unless flagged.
     communityVisible: flag(body.communityVisible),
+    // Shown to the community instead of the staff description.
+    communityDetails: optionalString(body.communityDetails, 'Community description', { max: 5000 }),
+    communityRsvp: flag(body.communityRsvp),
   };
 }
 
@@ -143,7 +148,20 @@ export function register(router: Router): void {
       [ctx.params.id!],
     );
 
-    return jsonResponse({ event: eventOut(row), attendees: attendees.map(contactOut) });
+    // Community members who said "I'll be there!" (names only).
+    const rsvps = await ctx.db.all<{ name: string; account_type: string }>(
+      `SELECT COALESCE(cp.first_name || ' ' || cp.last_name, u.name) AS name, ca.account_type
+         FROM event_rsvps r JOIN users u ON u.id = r.user_id
+         LEFT JOIN community_profiles cp ON cp.user_id = r.user_id
+         LEFT JOIN community_accounts ca ON ca.user_id = r.user_id
+        WHERE r.target_type = 'event' AND r.target_id = ? ORDER BY name ASC`,
+      [ctx.params.id!],
+    );
+    return jsonResponse({
+      event: eventOut(row),
+      attendees: attendees.map(contactOut),
+      communityRsvps: rsvps.map((r) => ({ name: r.name, accountType: r.account_type })),
+    });
   });
 
   router.post('/api/events', async (ctx: Ctx) => {
@@ -160,8 +178,9 @@ export function register(router: Router): void {
     await ctx.db.run(
       `INSERT INTO events
          (id, customer_id, name, starts_at, ends_at, event_type, location, description,
-          followup_notes, community_visible, created_at, updated_at, created_by, last_edited_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          followup_notes, community_visible, community_details, community_rsvp,
+          created_at, updated_at, created_by, last_edited_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
         customerId,
@@ -173,6 +192,8 @@ export function register(router: Router): void {
         fields.description,
         fields.followupNotes,
         fields.communityVisible,
+        fields.communityDetails,
+        fields.communityRsvp,
         timestamp,
         timestamp,
         userId,
@@ -208,7 +229,8 @@ export function register(router: Router): void {
     await ctx.db.run(
       `UPDATE events SET
          name = ?, starts_at = ?, ends_at = ?, event_type = ?, location = ?, description = ?,
-         followup_notes = ?, community_visible = ?, updated_at = ?, last_edited_by = ?
+         followup_notes = ?, community_visible = ?, community_details = ?, community_rsvp = ?,
+         updated_at = ?, last_edited_by = ?
        WHERE id = ? AND customer_id = ?`,
       [
         fields.name,
@@ -219,6 +241,8 @@ export function register(router: Router): void {
         fields.description,
         fields.followupNotes,
         fields.communityVisible,
+        fields.communityDetails,
+        fields.communityRsvp,
         nowIso(),
         userId,
         ctx.params.id!,
@@ -251,6 +275,35 @@ export function register(router: Router): void {
     if (!added) throw badRequest('That contact is already linked to this event.', 'Contact');
 
     return jsonResponse({ ok: true }, { status: 201 });
+  });
+
+  /** Email every opted-in community member about a community-visible event (queued; never sends twice). */
+  router.post('/api/events/:id/notify', async (ctx: Ctx) => {
+    const { customerId, userId } = requireEditor(ctx);
+    const event = await ctx.db.get<{ name: string; community_visible: number }>(
+      `SELECT name, community_visible FROM events WHERE id = ? AND customer_id = ? AND deleted_at IS NULL`,
+      [ctx.params.id!, customerId],
+    );
+    if (!event) throw notFound('That event no longer exists.');
+    if (Number(event.community_visible) !== 1) {
+      throw badRequest('Tick "Show in the community portal" before emailing members about this event.');
+    }
+    const queued = await enqueueAnnouncement(ctx.db, { customerId, refType: 'event', refId: ctx.params.id!, actorId: userId });
+    await ctx.db.run(`UPDATE events SET community_notified_at = COALESCE(community_notified_at, ?) WHERE id = ?`, [
+      nowIso(),
+      ctx.params.id!,
+    ]);
+    await audit(ctx.db, {
+      customerId,
+      userId,
+      action: 'event.notify',
+      entityType: 'event',
+      entityId: ctx.params.id!,
+      metadata: { name: event.name, recipients: queued },
+      req: ctx.req,
+    });
+    const row = await ctx.db.get(`${SELECT_EVENT} WHERE e.id = ?`, [ctx.params.id!]);
+    return jsonResponse({ queued, event: eventOut(row!) });
   });
 
   /** Unlinking leaves the generated note in place: it is a record of what happened. */

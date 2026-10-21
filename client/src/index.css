@@ -101,3 +101,11 @@
   width: 2px;
   background: theme('colors.slate.200');
 }
+
+/* Swipeable strips on touch screens: keep scrolling, hide the bar. */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}

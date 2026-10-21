@@ -4,7 +4,7 @@ import { Link, Navigate } from 'react-router-dom';
 import { accountTypeLabel } from '../../components/community.tsx';
 import { PhotoUpload, ProfileFields, ResumeUpload, draftFrom, payloadFrom } from '../../components/profileFields.tsx';
 import type { ProfileDraft } from '../../components/profileFields.tsx';
-import { Field, TextInput } from '../../components/ui.tsx';
+import { Checkbox, Field, TextInput } from '../../components/ui.tsx';
 import { ApiError, api } from '../../lib/api.ts';
 import type { CommunityState } from '../../lib/types.ts';
 import { useAuth } from '../../state/AuthContext.tsx';
@@ -52,6 +52,7 @@ export function ProfilePage() {
       )}
 
       <ProfileForm community={community} onSaved={setCommunity} />
+      <NotificationSettings community={community} onSaved={setCommunity} />
       <AccountSettings community={community} />
     </div>
   );
@@ -102,6 +103,32 @@ function ProfileForm({ community, onSaved }: { community: CommunityState; onSave
   );
 }
 
+function NotificationSettings({ community, onSaved }: { community: CommunityState; onSaved: (c: CommunityState) => void }) {
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  async function set(key: keyof CommunityState['notifications'], value: boolean) {
+    setBusy(true);
+    try {
+      onSaved((await api.put<{ community: CommunityState }>('/community/profile/notifications', { [key]: value })).community);
+    } catch (caught) {
+      toast.error(caught instanceof ApiError ? caught.message : 'That did not work.');
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <section className="card p-6" aria-labelledby="notify-heading">
+      <h2 id="notify-heading" className="text-sm font-bold uppercase tracking-wide text-navy-800">Email notifications</h2>
+      <p className="mt-1 text-sm text-slate-500">Sent to {community.email}. Every email also has a one-click unsubscribe link.</p>
+      <div className="mt-3">
+        <Checkbox label="When someone sends me a message (if I haven't read it within a couple of minutes)" checked={community.notifications.messages} onChange={(v) => set('messages', v)} disabled={busy} />
+        <Checkbox label="When someone mentions me in a post or comment" checked={community.notifications.mentions} onChange={(v) => set('mentions', v)} disabled={busy} />
+        <Checkbox label="New ECenter posts and events" checked={community.notifications.announcements} onChange={(v) => set('announcements', v)} disabled={busy} />
+      </div>
+    </section>
+  );
+}
+
 function AccountSettings({ community }: { community: CommunityState }) {
   const { refresh } = useAuth();
   const toast = useToast();
@@ -124,7 +151,7 @@ function AccountSettings({ community }: { community: CommunityState }) {
         email: newEmail,
         password: emailPassword,
       });
-      if (response.verificationEmailSent) toast.success(`Check ${newEmail} for a confirmation link.`);
+      if (response.verificationEmailSent) toast.success(`Check ${newEmail} for a confirmation link (and your spam folder).`);
       else toast.error("We couldn't send the confirmation email. Please try again later.");
       setNewEmail('');
       setEmailPassword('');

@@ -1,6 +1,7 @@
 import { Link, useParams } from 'react-router-dom';
 import { MemberActions, MemberAvatar, TopicChips, TypeBadge, subtitleFor } from '../../components/community.tsx';
 import { ErrorBlock, LoadingBlock } from '../../components/ui.tsx';
+import { api, openSignedUrl } from '../../lib/api.ts';
 import { useApi } from '../../lib/hooks.ts';
 import type { PublicMember } from '../../lib/types.ts';
 import { useAuth } from '../../state/AuthContext.tsx';
@@ -43,6 +44,21 @@ export function MemberProfilePage() {
                 <TypeBadge type={member.accountType} />
                 {subtitle && <span className="text-sm text-slate-500">{subtitle}</span>}
               </div>
+              {member.hasPublicResume && (
+                <button
+                  type="button"
+                  className="mr-4 mt-2 inline-flex items-center gap-1 text-sm font-semibold text-teal-700 hover:underline"
+                  onClick={async () => {
+                    try {
+                      openSignedUrl((await api.get<{ url: string }>(`/community/members/${member.id}/resume`)).url);
+                    } catch {
+                      window.alert('That resume is no longer available.');
+                    }
+                  }}
+                >
+                  View resume
+                </button>
+              )}
               {member.linkedinUrl && (
                 <a
                   href={member.linkedinUrl}

@@ -16,11 +16,12 @@ import {
 } from '../components/ui.tsx';
 import { ApiError, api, buildQuery } from '../lib/api.ts';
 import { EVENT_TYPES } from '../lib/constants.ts';
-import { formatDate, formatDateTime, formatTime } from '../lib/format.ts';
+import { formatDate, formatDateTime, formatTime, humanise } from '../lib/format.ts';
 import { useApi } from '../lib/hooks.ts';
 import type { Contact, CrmEvent } from '../lib/types.ts';
 import { useAuth } from '../state/AuthContext.tsx';
 import { useToast } from '../state/ToastContext.tsx';
+import { Combobox } from '../components/Combobox.tsx';
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTH_NAMES = [
@@ -435,9 +436,27 @@ function EventPanel({
 }) {
   const { canEdit } = useAuth();
   const toast = useToast();
-  const { data, loading, error, reload } = useApi<{ event: CrmEvent; attendees: Contact[] }>(
-    `/events/${eventId}`,
-  );
+  const { data, loading, error, reload } = useApi<{
+    event: CrmEvent;
+    attendees: Contact[];
+    communityRsvps: { name: string; accountType: string }[];
+  }>(`/events/${eventId}`);
+  const [notifying, setNotifying] = useState(false);
+
+  async function notifyMembers() {
+    setBusy(true);
+    try {
+      const result = await api.post<{ queued: number }>(`/events/${eventId}/notify`);
+      toast.success(`Emailing ${result.queued} members over the next few minutes.`);
+      reload();
+      onChanged();
+    } catch (caught) {
+      toast.error(caught instanceof ApiError ? caught.message : 'That did not work.');
+    } finally {
+      setBusy(false);
+      setNotifying(false);
+    }
+  }
 
   const [editing, setEditing] = useState(false);
   const [addId, setAddId] = useState('');
@@ -543,6 +562,39 @@ function EventPanel({
             )}
           </section>
 
+          {event.communityVisible && (
+            <section className="rounded-lg border border-teal-100 bg-teal-50/50 p-3">
+              <SectionHeader title="Community portal" />
+              <p className="text-sm text-slate-600">
+                Shown to students and mentors in Upcoming events{event.communityRsvp ? ', with “I’ll be there!” RSVPs' : ''}.
+                {event.communityNotifiedAt && ` Members were emailed ${formatDate(event.communityNotifiedAt)}.`}
+              </p>
+              {event.communityDetails && (
+                <p className="mt-2 whitespace-pre-line text-sm text-slate-700">{event.communityDetails}</p>
+              )}
+              {event.communityRsvp && (
+                <div className="mt-3">
+                  <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                    Going ({data?.communityRsvps.length ?? 0})
+                  </p>
+                  {data && data.communityRsvps.length === 0 && <p className="text-sm text-slate-500">No RSVPs yet.</p>}
+                  <ul className="mt-1 flex flex-wrap gap-1.5">
+                    {(data?.communityRsvps ?? []).map((r, i) => (
+                      <li key={i} className="chip bg-white text-slate-700">
+                        {r.name} <span className="text-slate-400">· {humanise(r.accountType ?? '')}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {canEdit && (
+                <button type="button" className="btn-ghost mt-3 min-h-[40px]" disabled={busy} onClick={() => setNotifying(true)}>
+                  {event.communityNotifiedAt ? 'Emailed ✓ (send to new members)' : 'Email members about this event'}
+                </button>
+              )}
+            </section>
+          )}
+
           {event.followupNotes && (
             <section>
               <SectionHeader title="Post-event debrief" />
@@ -587,19 +639,19 @@ function EventPanel({
 
             {canEdit && (
               <div className="mt-3 flex flex-col gap-2 rounded-lg bg-slate-50 p-3 sm:flex-row">
-                <select
-                  className="input"
-                  value={addId}
-                  onChange={(changeEvent) => setAddId(changeEvent.target.value)}
-                  aria-label="Add an attendee"
-                >
-                  <option value="">Add someone who attended...</option>
-                  {candidates.map((contact) => (
-                    <option key={contact.id} value={contact.id}>
-                      {contact.fullName}
-                    </option>
-                  ))}
-                </select>
+                <div className="min-w-0 flex-1">
+                  <Combobox
+                    value={addId}
+                    options={candidates.map((contact) => ({
+                      value: contact.id,
+                      label: contact.fullName,
+                      sublabel: contact.organizationName,
+                    }))}
+                    placeholder="Search for someone who attended..."
+                    onChange={setAddId}
+                    ariaLabel="Add an attendee"
+                  />
+                </div>
                 <button
                   type="button"
                   className="btn-secondary shrink-0"
@@ -632,6 +684,15 @@ function EventPanel({
         )}
       </Modal>
 
+      <ConfirmDialog
+        open={notifying}
+        title="Email members about this event?"
+        message="Every active member who has announcement emails turned on gets an email with a link to the event. Anyone already emailed about it will not get it again."
+        confirmLabel="Send emails"
+        busy={busy}
+        onConfirm={notifyMembers}
+        onCancel={() => setNotifying(false)}
+      />
       <ConfirmDialog
         open={confirmDelete}
         title="Delete this event?"

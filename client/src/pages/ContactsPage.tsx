@@ -26,6 +26,7 @@ import type { Contact, ContactsResponse, OrganizationsResponse } from '../lib/ty
 import { useAuth } from '../state/AuthContext.tsx';
 import { useToast } from '../state/ToastContext.tsx';
 import { api } from '../lib/api.ts';
+import { Combobox } from '../components/Combobox.tsx';
 
 const SORT_OPTIONS = [
   { value: 'name', label: 'Name (A-Z)' },
@@ -239,12 +240,12 @@ export function ContactsPage() {
             </label>
             <label className="block">
               <span className="label">Organization</span>
-              <Select
+              <Combobox
                 value={organizationId}
                 options={(orgs?.organizations ?? []).map((org) => ({ value: org.id, label: org.name }))}
-                includeAll
-                allLabel="Any organization"
-                onChange={(event) => setOrganizationId(event.target.value)}
+                emptyOption={{ value: 'all', label: 'Any organization' }}
+                placeholder="Search organizations"
+                onChange={setOrganizationId}
               />
             </label>
             <label className="block">
@@ -359,7 +360,7 @@ export function ContactsPage() {
 
       {contacts.length > 0 && (
         <>
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
             {contacts.map((contact) => (
               <ContactCard
                 key={contact.id}
@@ -437,7 +438,7 @@ function ContactCard({
   onOpen: () => void;
 }) {
   return (
-    <div className={`card-interactive relative p-4 ${selected ? 'border-teal ring-1 ring-teal' : ''}`}>
+    <div className={`card-interactive relative min-w-0 p-4 ${selected ? 'border-teal ring-1 ring-teal' : ''}`}>
       {selectable && (
         <input
           type="checkbox"

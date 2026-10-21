@@ -105,7 +105,11 @@ export function MessagesPage() {
         <p className="rounded-lg bg-red-50 px-3 py-2 text-sm font-semibold text-urgent" role="alert">{startError}</p>
       )}
 
-      <div className="card grid min-h-[60vh] overflow-hidden md:h-[calc(100vh-15rem)] md:grid-cols-[320px_minmax(0,1fr)]">
+      <div
+        className={`card grid overflow-hidden md:h-[calc(100vh-15rem)] md:grid-cols-[320px_minmax(0,1fr)] ${
+          selectedId ? 'h-[calc(100dvh-8.5rem)]' : 'min-h-[60vh]'
+        }`}
+      >
         {/* Conversation list: always on desktop; on mobile only when no conversation is open. */}
         <section className={`min-h-0 border-slate-200 md:flex md:flex-col md:border-r ${selectedId ? 'hidden' : 'flex flex-col'}`} aria-label="Conversations">
           {list.loading && !list.data && <LoadingBlock label="Loading conversations" />}

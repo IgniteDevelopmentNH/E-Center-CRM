@@ -131,7 +131,7 @@ export function DashboardPage() {
         </section>
       )}
 
-      <div className="grid gap-6 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <section className="lg:col-span-2">
           <SectionHeader
             title="This week's focus"

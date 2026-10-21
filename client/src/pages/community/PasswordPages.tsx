@@ -32,7 +32,7 @@ export function ForgotPasswordPage() {
         <div role="status">
           <p className="mt-2 text-sm text-slate-600">
             If an account exists for <span className="font-semibold">{email}</span>, we've sent a link to choose a new
-            password. It expires in one hour.
+            password. It expires in one hour. If it doesn't arrive in a few minutes, check your spam or junk folder.
           </p>
           <Link to="/login" className="btn-ghost mt-6">
             Back to sign in

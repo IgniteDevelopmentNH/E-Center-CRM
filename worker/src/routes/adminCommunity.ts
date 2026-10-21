@@ -8,6 +8,7 @@ import { oneOf, optionalId, optionalString, positiveInt } from '../lib/validate.
 import { requireEditor, requireStaff } from '../middleware/auth.ts';
 import type { Ctx, Router } from '../router.ts';
 import { finalizeAccount, loadTags, staffLinkAccount } from '../services/community.ts';
+import { POST_PERMISSIONS, effectivePostPermission } from '../services/posts.ts';
 
 /**
  * Staff view of community accounts. Owners and editors can deactivate,
@@ -54,6 +55,10 @@ function accountOut(row: Record<string, unknown>) {
     emailDiffersFromContact:
       !!row.contact_email && String(row.contact_email).trim().toLowerCase() !== String(row.email).trim().toLowerCase(),
     hasResume: !!row.resume_key,
+    resumePublic: Number(row.resume_public ?? 0) === 1,
+    // Stored override (null = account-type default) and what actually applies.
+    postPermissionOverride: row.post_permission ? String(row.post_permission) : null,
+    postPermission: effectivePostPermission(String(row.account_type), row.post_permission as string | null, String(row.user_role)),
     resumeName: row.resume_name ? String(row.resume_name) : null,
     createdAt: String(row.created_at),
     activatedAt: row.activated_at ? String(row.activated_at) : null,
@@ -262,6 +267,38 @@ export function register(router: Router): void {
       [nowIso(), ctx.params.userId!, customerId],
     );
     await finalizeAccount(ctx, ctx.params.userId!);
+    return jsonResponse(await detail(ctx, ctx.params.userId!, customerId));
+  });
+
+  /**
+   * Posting permission for one member: 'none' | 'approval' | 'direct', or
+   * 'default' to go back to the account-type default (students none,
+   * mentors approval). Owners and editors only.
+   */
+  router.put('/api/admin/community/accounts/:userId/permissions', async (ctx: Ctx) => {
+    const { customerId, userId } = requireEditor(ctx);
+    const row = await loadAccount(ctx, ctx.params.userId!, customerId);
+    const body = await readJson(ctx.req);
+    const value = oneOf(body.postPermission, 'Posting', [...POST_PERMISSIONS, 'default'] as const);
+    await ctx.db.run(`UPDATE community_accounts SET post_permission = ?, updated_at = ? WHERE user_id = ? AND customer_id = ?`, [
+      value === 'default' ? null : value,
+      nowIso(),
+      ctx.params.userId!,
+      customerId,
+    ]);
+    await audit(ctx.db, {
+      customerId,
+      userId,
+      action: 'community.permissions_changed',
+      entityType: 'user',
+      entityId: ctx.params.userId!,
+      metadata: {
+        name: `${String(row.first_name)} ${String(row.last_name)}`,
+        from: row.post_permission ?? 'default',
+        to: value,
+      },
+      req: ctx.req,
+    });
     return jsonResponse(await detail(ctx, ctx.params.userId!, customerId));
   });
 

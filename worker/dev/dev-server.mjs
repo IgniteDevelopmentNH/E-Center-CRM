@@ -65,6 +65,12 @@ if (!env.JWT_SECRET || !env.ENCRYPTION_KEY) {
   env.ENCRYPTION_KEY ??= 'dev-only-encryption-key-do-not-ship';
 }
 
+// Production runs the scheduled handler from a cron trigger every minute; do
+// the same locally so queued notification emails go out (to this console).
+setInterval(() => {
+  worker.scheduled?.({}, env).catch((error) => console.error('[dev] scheduled run failed', error));
+}, 30_000);
+
 createServer(async (nodeReq, nodeRes) => {
   try {
     const url = `http://${nodeReq.headers.host || 'localhost'}${nodeReq.url}`;

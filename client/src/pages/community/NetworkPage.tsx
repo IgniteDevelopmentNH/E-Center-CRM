@@ -71,7 +71,7 @@ export function NetworkPage() {
       )}
 
       {members.length > 0 && (
-        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {members.map((member) => (
             <MemberCard key={member.id} member={member} footer={<MemberActions member={member} compact />} />
           ))}

@@ -12,6 +12,8 @@ import { register as registerBootstrap } from './routes/bootstrap.ts';
 import { register as registerCalendar } from './routes/calendar.ts';
 import { register as registerCommunityAccount } from './routes/communityAccount.ts';
 import { register as registerCommunityContent } from './routes/communityContent.ts';
+import { register as registerCommunityPosts } from './routes/communityPosts.ts';
+import { runScheduledNotifications } from './services/notifications.ts';
 import { register as registerContacts } from './routes/contacts.ts';
 import { register as registerDashboard } from './routes/dashboard.ts';
 import { register as registerDocuments } from './routes/documents.ts';
@@ -43,6 +45,7 @@ router
   // Community portal (students, mentors, staff community identities).
   .use(registerCommunityAccount)
   .use(registerCommunityContent)
+  .use(registerCommunityPosts)
   .use(registerMessages);
 
 /**
@@ -147,5 +150,14 @@ export default {
     } catch (error) {
       return finalize(errorToResponse(error, true), origin, allowed, true);
     }
+  },
+
+  /**
+   * Cron trigger (wrangler.toml [triggers], every minute): sends queued
+   * community notification emails a batch at a time. See services/notifications.ts.
+   */
+  async scheduled(_controller: unknown, env: Env): Promise<void> {
+    const result = await runScheduledNotifications(env);
+    if (result.claimed) console.log('[notifications]', JSON.stringify(result));
   },
 };

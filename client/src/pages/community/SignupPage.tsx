@@ -10,7 +10,7 @@ import {
   payloadFrom,
 } from '../../components/profileFields.tsx';
 import type { ProfileDraft } from '../../components/profileFields.tsx';
-import { Field, TextInput } from '../../components/ui.tsx';
+import { Checkbox, Field, TextInput } from '../../components/ui.tsx';
 import { ApiError, api } from '../../lib/api.ts';
 import type { AccountType, CommunityState } from '../../lib/types.ts';
 import { useAuth } from '../../state/AuthContext.tsx';
@@ -118,6 +118,7 @@ export function SignupPage() {
   const [draft, setDraft] = useState<ProfileDraft>(() => draftFrom(community));
   const [busy, setBusy] = useState(false);
   const [emailSent, setEmailSent] = useState<boolean | null>(null);
+  const [announcements, setAnnouncements] = useState(true);
   const { error, setError, capture, errorFor } = useFieldErrors();
 
   useEffect(() => {
@@ -174,6 +175,7 @@ export function SignupPage() {
     try {
       const base = skipDetails ? { ...draftFrom(null), firstName: draft.firstName, lastName: draft.lastName } : draft;
       await api.put('/community/profile', payloadFrom(base, role));
+      if (!announcements) await api.put('/community/profile/notifications', { announcements: false });
       const done = await api.post<{ community: CommunityState }>('/community/onboarding/complete');
       setCommunity(done.community);
       if (done.community.status === 'active') navigate('/', { replace: true });
@@ -309,12 +311,26 @@ export function SignupPage() {
               Your account was created, but we couldn't send the verification email just now. You can resend it at the next step.
             </p>
           )}
+          {emailSent === true && community && (
+            <div className="rounded-lg bg-teal-50 px-3 py-2 text-sm text-teal-800" role="status">
+              <p>
+                We sent a confirmation email to <span className="font-semibold">{community.email}</span>.
+              </p>
+              <p className="mt-1">If you don't see it in your inbox within a few minutes, check your spam or junk folder and mark it “Not spam” so future emails arrive normally.</p>
+            </div>
+          )}
 
           {community && <PhotoUpload community={community} onUpdated={setCommunity} />}
 
           <ProfileFields accountType={role ?? 'student'} draft={draft} onChange={setDraft} errorFor={errorFor} />
 
           {community && <ResumeUpload community={community} onUpdated={setCommunity} />}
+
+          <Checkbox
+            label="Email me about new ECenter posts and events (you can turn this off any time)"
+            checked={announcements}
+            onChange={setAnnouncements}
+          />
 
           {error && !['Bio', 'LinkedIn URL', 'Scheduling link', 'Graduation year', 'Major', 'Role', 'Company', 'Interests', 'Help topics'].includes(error.field ?? '') && (
             <p className="rounded-lg bg-red-50 px-3 py-2 text-sm font-semibold text-urgent" role="alert">
@@ -363,7 +379,7 @@ function VerifyNotice({
       else
         setStatus(
           response.verificationEmailSent
-            ? { tone: 'ok', text: 'A new link is on its way.' }
+            ? { tone: 'ok', text: 'A new link is on its way. Remember to check your spam or junk folder.' }
             : { tone: 'error', text: "We couldn't send the email. Please contact the ECenter." },
         );
     } catch (caught) {
@@ -386,6 +402,9 @@ function VerifyNotice({
       <h2 className="text-2xl font-bold text-navy-800">Confirm your email</h2>
       <p className="mt-2 text-sm text-slate-600">
         We sent a link to <span className="font-semibold">{email}</span>. Open it to activate your account. Your profile is saved.
+      </p>
+      <p className="mt-3 rounded-lg bg-teal-50 px-3 py-2 text-sm text-teal-800">
+        <span className="font-semibold">Can't find it?</span> If you don't see it in your inbox within a few minutes, check your spam or junk folder and mark it “Not spam” so future emails arrive normally.
       </p>
       {status && (
         <p

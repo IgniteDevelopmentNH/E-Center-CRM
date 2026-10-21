@@ -25,6 +25,26 @@ const dbPath = process.env.DEV_SQLITE_PATH || path.join(workerRoot, 'data', 'dev
 const ADDED_COLUMNS: { table: string; column: string; definition: string }[] = [
   { table: 'users', column: 'email_verified_at', definition: 'TEXT' },
   { table: 'events', column: 'community_visible', definition: 'INTEGER NOT NULL DEFAULT 0' },
+  // 2026-10-20-community-v2
+  { table: 'community_accounts', column: 'post_permission', definition: 'TEXT' },
+  { table: 'community_accounts', column: 'resume_public', definition: 'INTEGER NOT NULL DEFAULT 0' },
+  { table: 'community_accounts', column: 'notify_messages', definition: 'INTEGER NOT NULL DEFAULT 1' },
+  { table: 'community_accounts', column: 'notify_mentions', definition: 'INTEGER NOT NULL DEFAULT 1' },
+  { table: 'community_accounts', column: 'notify_announcements', definition: 'INTEGER NOT NULL DEFAULT 1' },
+  { table: 'interest_tags', column: 'featured', definition: 'INTEGER NOT NULL DEFAULT 1' },
+  { table: 'posts', column: 'author_kind', definition: "TEXT NOT NULL DEFAULT 'staff'" },
+  { table: 'posts', column: 'review_note', definition: 'TEXT' },
+  { table: 'posts', column: 'reviewed_by', definition: 'TEXT' },
+  { table: 'posts', column: 'reviewed_at', definition: 'TEXT' },
+  { table: 'posts', column: 'event_starts_at', definition: 'TEXT' },
+  { table: 'posts', column: 'event_ends_at', definition: 'TEXT' },
+  { table: 'posts', column: 'event_location', definition: 'TEXT' },
+  { table: 'posts', column: 'rsvp_enabled', definition: 'INTEGER NOT NULL DEFAULT 0' },
+  { table: 'posts', column: 'notified_at', definition: 'TEXT' },
+  { table: 'posts', column: 'deleted_by', definition: 'TEXT' },
+  { table: 'events', column: 'community_details', definition: 'TEXT' },
+  { table: 'events', column: 'community_rsvp', definition: 'INTEGER NOT NULL DEFAULT 0' },
+  { table: 'events', column: 'community_notified_at', definition: 'TEXT' },
 ];
 
 function main(): void {

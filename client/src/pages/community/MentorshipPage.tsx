@@ -69,7 +69,7 @@ export function MentorshipPage() {
             </p>
           )}
           {recommendations.length > 0 && (
-            <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+            <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3">
               {recommendations.map((rec) => (
                 <MentorCard key={rec.mentor.id} member={rec.mentor} reason={rec.reason} />
               ))}
@@ -88,7 +88,7 @@ export function MentorshipPage() {
           <EmptyState title="No mentors found" message={filtering ? 'Try a different search or topic.' : 'Mentors will appear here once they join.'} icon="★" />
         )}
         {mentors.length > 0 && (
-          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {mentors.map((mentor) => (
               <MentorCard key={mentor.id} member={mentor} />
             ))}

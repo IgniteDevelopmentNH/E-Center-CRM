@@ -32,6 +32,12 @@ import {
   photoUrl,
   replaceTagWrites,
 } from '../services/community.ts';
+import {
+  PREFERENCE_COLUMNS,
+  readUnsubscribeToken,
+} from '../services/notifications.ts';
+import type { PreferenceKind } from '../services/notifications.ts';
+import { effectivePostPermission } from '../services/posts.ts';
 import { storeCommunityUpload } from '../services/communityFiles.ts';
 import { deleteObject } from '../services/storage.ts';
 
@@ -52,8 +58,9 @@ async function defaultCustomerId(ctx: Ctx): Promise<string> {
 export async function ownCommunityState(ctx: Ctx, userId: string) {
   const row = await ctx.db.get<Record<string, unknown>>(
     `SELECT ca.account_type, ca.status, ca.onboarding_completed_at, ca.link_state,
-            ca.resume_name, ca.resume_size, ca.resume_uploaded_at,
-            u.email, u.email_verified_at,
+            ca.resume_name, ca.resume_size, ca.resume_uploaded_at, ca.resume_public,
+            ca.post_permission, ca.notify_messages, ca.notify_mentions, ca.notify_announcements,
+            u.email, u.email_verified_at, u.role,
             p.first_name, p.last_name, p.bio, p.linkedin_url, p.photo_key, p.major, p.graduation_year,
             p.role_title, p.company, p.scheduling_url,
             (SELECT t.email FROM auth_tokens t
@@ -90,8 +97,20 @@ export async function ownCommunityState(ctx: Ctx, userId: string) {
       help: tags?.help ?? [],
     },
     resume: row.resume_name
-      ? { fileName: String(row.resume_name), size: Number(row.resume_size ?? 0), uploadedAt: String(row.resume_uploaded_at) }
+      ? {
+          fileName: String(row.resume_name),
+          size: Number(row.resume_size ?? 0),
+          uploadedAt: String(row.resume_uploaded_at),
+          public: Number(row.resume_public) === 1,
+        }
       : null,
+    // What this person may do with posts (see services/posts.ts).
+    postPermission: effectivePostPermission(String(row.account_type), row.post_permission as string | null, String(row.role)),
+    notifications: {
+      messages: Number(row.notify_messages) === 1,
+      mentions: Number(row.notify_mentions) === 1,
+      announcements: Number(row.notify_announcements) === 1,
+    },
   };
 }
 
@@ -142,11 +161,11 @@ export function register(router: Router): void {
     const auth = ctx.auth;
     const customerId = auth?.customerId ?? (await defaultCustomerId(ctx));
     await ensureDefaultTags(ctx.db, customerId);
-    const rows = await ctx.db.all<{ slug: string; label: string }>(
-      `SELECT slug, label FROM interest_tags WHERE customer_id = ? ORDER BY label ASC`,
+    const rows = await ctx.db.all<{ slug: string; label: string; featured: number }>(
+      `SELECT slug, label, featured FROM interest_tags WHERE customer_id = ? ORDER BY label ASC`,
       [customerId],
     );
-    return jsonResponse({ tags: rows });
+    return jsonResponse({ tags: rows.map((row) => ({ slug: row.slug, label: row.label, featured: Number(row.featured) === 1 })) });
   });
 
   /**
@@ -566,6 +585,61 @@ export function register(router: Router): void {
     );
     if (previous?.resume_key) await deleteObject(ctx.env.DOCS, previous.resume_key).catch(() => undefined);
     return jsonResponse({ community: await ownCommunityState(ctx, auth.userId) });
+  });
+
+  /** Members choose whether their resume shows on their public profile (private by default). */
+  router.put('/api/community/profile/resume-visibility', async (ctx: Ctx) => {
+    const { auth } = await requireOwnCommunityAccount(ctx);
+    const body = await readJson(ctx.req);
+    await ctx.db.run(`UPDATE community_accounts SET resume_public = ?, updated_at = ? WHERE user_id = ?`, [
+      body.public === true ? 1 : 0,
+      nowIso(),
+      auth.userId,
+    ]);
+    return jsonResponse({ community: await ownCommunityState(ctx, auth.userId) });
+  });
+
+  /** Email notification preferences. Each flag is optional; omitted ones are left unchanged. */
+  router.put('/api/community/profile/notifications', async (ctx: Ctx) => {
+    const { auth } = await requireOwnCommunityAccount(ctx);
+    const body = await readJson(ctx.req);
+    const sets: string[] = [];
+    const params: (string | number)[] = [];
+    for (const pref of ['messages', 'mentions', 'announcements'] as const) {
+      if (typeof body[pref] === 'boolean') {
+        sets.push(`${PREFERENCE_COLUMNS[pref]} = ?`);
+        params.push(body[pref] ? 1 : 0);
+      }
+    }
+    if (sets.length) {
+      await ctx.db.run(`UPDATE community_accounts SET ${sets.join(', ')}, updated_at = ? WHERE user_id = ?`, [
+        ...params,
+        nowIso(),
+        auth.userId,
+      ]);
+    }
+    return jsonResponse({ community: await ownCommunityState(ctx, auth.userId) });
+  });
+
+  /**
+   * Unsubscribe from one kind of email via a signed link (no sign-in needed).
+   * The emailed link opens a confirmation page that POSTs here; mail
+   * providers' one-click unsubscribe (RFC 8058) POSTs here directly. A plain
+   * GET changes nothing, so link scanners cannot unsubscribe anyone.
+   */
+  router.post('/api/community/unsubscribe', async (ctx: Ctx) => {
+    let token = ctx.query.get('token') ?? '';
+    if (!token) {
+      const body = await readJson(ctx.req).catch(() => ({}) as Record<string, unknown>);
+      token = typeof body.token === 'string' ? body.token : '';
+    }
+    const parsed = await readUnsubscribeToken(ctx.config, token);
+    if (!parsed) throw badRequest('That unsubscribe link is invalid or has expired.');
+    await ctx.db.run(`UPDATE community_accounts SET ${PREFERENCE_COLUMNS[parsed.pref]} = 0, updated_at = ? WHERE user_id = ?`, [
+      nowIso(),
+      parsed.userId,
+    ]);
+    return jsonResponse({ ok: true, preference: parsed.pref satisfies PreferenceKind });
   });
 
   router.get('/api/community/profile/resume', async (ctx: Ctx) => {

@@ -38,6 +38,7 @@ import {
   TextArea,
   TextInput,
 } from './ui.tsx';
+import { Combobox } from './Combobox.tsx';
 
 /** Shared submit plumbing: busy state, field-level errors, toast on failure. */
 function useSubmit<T>(onSaved: (result: T) => void) {
@@ -529,35 +530,29 @@ export function TaskForm({
           />
         </Field>
         <Field label="Assigned to" error={errorFor('Assigned to')}>
-          <select
-            className="input pr-8"
+          <Combobox
             value={assignedTo}
-            onChange={(event) => setAssignedTo(event.target.value)}
-          >
-            <option value="">Unassigned</option>
-            {(userData?.users ?? []).map((user) => (
-              <option key={user.id} value={user.id}>
-                {user.name}
-              </option>
-            ))}
-          </select>
+            options={(userData?.users ?? []).map((user) => ({ value: user.id, label: user.name }))}
+            emptyOption={{ value: '', label: 'Unassigned' }}
+            placeholder="Search team"
+            onChange={setAssignedTo}
+          />
         </Field>
       </div>
 
       <Field label="About which contact" error={errorFor('Contact')}>
-        <select
-          className="input pr-8"
+        <Combobox
           value={selectedContact}
-          onChange={(event) => setSelectedContact(event.target.value)}
+          options={(contactData?.contacts ?? []).map((contact) => ({
+            value: contact.id,
+            label: contact.fullName,
+            sublabel: contact.organizationName,
+          }))}
+          emptyOption={{ value: '', label: 'No specific contact' }}
+          placeholder="Search contacts"
+          onChange={setSelectedContact}
           disabled={!!contactId && !initial}
-        >
-          <option value="">No specific contact</option>
-          {(contactData?.contacts ?? []).map((contact) => (
-            <option key={contact.id} value={contact.id}>
-              {contact.fullName}
-            </option>
-          ))}
-        </select>
+        />
       </Field>
 
       <div className="grid gap-4 sm:grid-cols-2">
@@ -733,6 +728,8 @@ export function EventForm({
   const [description, setDescription] = useState(initial?.description ?? '');
   const [followupNotes, setFollowupNotes] = useState(initial?.followupNotes ?? '');
   const [communityVisible, setCommunityVisible] = useState(initial?.communityVisible ?? false);
+  const [communityDetails, setCommunityDetails] = useState(initial?.communityDetails ?? '');
+  const [communityRsvp, setCommunityRsvp] = useState(initial?.communityRsvp ?? false);
   const [contactIds, setContactIds] = useState<string[]>([]);
 
   const { data: contactData } = useApi<{ contacts: Contact[] }>('/contacts?limit=200&sort=name');
@@ -754,6 +751,8 @@ export function EventForm({
               description,
               followupNotes,
               communityVisible,
+              communityDetails: communityVisible ? communityDetails : null,
+              communityRsvp: communityVisible && communityRsvp,
               ...(initial ? {} : { contactIds }),
             };
             const response = initial
@@ -818,8 +817,17 @@ export function EventForm({
           onChange={setCommunityVisible}
         />
         <p className="-mt-1 text-xs text-slate-500">
-          Students and mentors see the name, time and location only. Leave unchecked for internal events.
+          Students and mentors see the name, time, location and the community description below, never the staff
+          description or attendees. Leave unchecked for internal events.
         </p>
+        {communityVisible && (
+          <div className="mt-3 space-y-3 rounded-lg border border-slate-200 p-3">
+            <Field label="Description for the community" hint="Optional. Shown on the event's page in the portal." error={errorFor('Community description')}>
+              <TextArea value={communityDetails} onChange={(event) => setCommunityDetails(event.target.value)} rows={3} />
+            </Field>
+            <Checkbox label={'Let members say "I\'ll be there!"'} checked={communityRsvp} onChange={setCommunityRsvp} />
+          </div>
+        )}
       </div>
 
       {!initial && (

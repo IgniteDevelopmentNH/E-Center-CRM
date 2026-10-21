@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { Link, NavLink, useNavigate } from 'react-router-dom';
-import { buildQuery } from '../lib/api.ts';
+import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { api, buildQuery } from '../lib/api.ts';
 import { formatRelative, truncate } from '../lib/format.ts';
 import { useApi, useDebounced, useEscapeKey } from '../lib/hooks.ts';
 import type { SearchResponse } from '../lib/types.ts';
@@ -20,7 +20,29 @@ const TABS = [
   { to: '/admin/settings', label: 'Settings', icon: '⚙' },
 ];
 
+/** Member posts waiting for approval, refreshed on navigation and every minute. */
+function usePendingPosts(): number {
+  const [count, setCount] = useState(0);
+  const location = useLocation();
+  useEffect(() => {
+    let cancelled = false;
+    const load = () =>
+      api
+        .get<{ pendingCount: number }>('/admin/posts?status=pending&limit=1')
+        .then((r) => !cancelled && setCount(r.pendingCount))
+        .catch(() => undefined);
+    void load();
+    const timer = window.setInterval(() => document.visibilityState === 'visible' && load(), 60_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [location.pathname]);
+  return count;
+}
+
 export function AppShell({ children }: { children: ReactNode }) {
+  const pendingPosts = usePendingPosts();
   const { user, customer, signOut, canEdit } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
   const [fabOpen, setFabOpen] = useState(false);
@@ -115,6 +137,11 @@ export function AppShell({ children }: { children: ReactNode }) {
               >
                 <span aria-hidden="true">{tab.icon}</span>
                 {tab.label}
+                {tab.to === '/admin/posts' && pendingPosts > 0 && (
+                  <span className="rounded-full bg-gold px-1.5 text-[11px] font-bold text-navy-900" aria-label={`${pendingPosts} awaiting approval`}>
+                    {pendingPosts}
+                  </span>
+                )}
               </NavLink>
             ))}
           </div>

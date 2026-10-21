@@ -130,6 +130,10 @@ export interface CrmEvent {
   description: string | null;
   followupNotes: string | null;
   communityVisible: boolean;
+  communityDetails: string | null;
+  communityRsvp: boolean;
+  communityRsvpCount: number;
+  communityNotifiedAt: string | null;
   attendeeCount: number;
   externalId: string | null;
   createdAt: string;
@@ -261,7 +265,11 @@ export type AccountStatus = 'pending' | 'active' | 'deactivated';
 export interface InterestTag {
   slug: string;
   label: string;
+  /** Featured topics show first; the rest are behind "See more". */
+  featured?: boolean;
 }
+
+export type PostPermission = 'none' | 'approval' | 'direct';
 
 /** The caller's own community record (private: includes email and resume). */
 export interface CommunityState {
@@ -286,7 +294,9 @@ export interface CommunityState {
     interests: InterestTag[];
     help: InterestTag[];
   };
-  resume: { fileName: string; size: number; uploadedAt: string } | null;
+  resume: { fileName: string; size: number; uploadedAt: string; public: boolean } | null;
+  postPermission: PostPermission;
+  notifications: { messages: boolean; mentions: boolean; announcements: boolean };
 }
 
 /** How a member appears to other members. Public fields only. */
@@ -306,6 +316,7 @@ export interface PublicMember {
   schedulingUrl: string | null;
   interests: InterestTag[];
   help: InterestTag[];
+  hasPublicResume: boolean;
   available: boolean;
 }
 
@@ -313,10 +324,24 @@ export type MembersResponse = Paged & { members: PublicMember[] };
 
 export interface CommunityEvent {
   id: string;
+  /** 'event' = a CRM event shown to the community; 'post' = an event post. */
+  source: 'event' | 'post';
   name: string;
   startsAt: string;
   endsAt: string | null;
   location: string | null;
+}
+
+export interface CommunityEventDetail {
+  id: string;
+  name: string;
+  startsAt: string;
+  endsAt: string | null;
+  location: string | null;
+  details: string | null;
+  rsvpEnabled: boolean;
+  rsvpCount: number;
+  going: boolean;
 }
 
 export interface FeedPost {
@@ -325,9 +350,41 @@ export interface FeedPost {
   body: string;
   linkUrl: string | null;
   imageUrl: string | null;
-  publishedAt: string;
-  authorName: string;
-  event: CommunityEvent | null;
+  status: 'draft' | 'pending' | 'published' | 'rejected' | 'archived';
+  publishedAt: string | null;
+  updatedAt: string;
+  reviewNote: string | null;
+  author: {
+    kind: 'member' | 'staff';
+    id: string | null;
+    name: string;
+    accountType: string;
+    photoUrl: string | null;
+  };
+  event: {
+    startsAt: string;
+    endsAt: string | null;
+    location: string | null;
+    rsvpEnabled: boolean;
+    rsvpCount: number;
+    going: boolean;
+  } | null;
+  linkedEvent: { id: string; name: string; startsAt: string; endsAt: string | null; location: string | null } | null;
+  likeCount: number;
+  commentCount: number;
+  likedByMe: boolean;
+  canEdit: boolean;
+  canDelete: boolean;
+}
+
+export interface PostComment {
+  id: string;
+  parentId: string | null;
+  body: string;
+  createdAt: string;
+  author: { id: string | null; name: string; accountType: string; photoUrl: string | null; isPostAuthor: boolean };
+  canDelete: boolean;
+  replies?: PostComment[];
 }
 
 export interface Recommendation {
@@ -365,11 +422,48 @@ export interface AdminPost {
   eventName: string | null;
   eventStartsAt: string | null;
   eventCommunityVisible: boolean;
-  status: 'draft' | 'published' | 'archived';
+  isEvent: boolean;
+  eventDetails: { startsAt: string; endsAt: string | null; location: string | null; rsvpEnabled: boolean } | null;
+  status: 'draft' | 'pending' | 'published' | 'rejected' | 'archived';
+  deleted: boolean;
   publishedAt: string | null;
+  authorKind: 'member' | 'staff';
+  authorId: string | null;
   authorName: string | null;
+  authorAccountType: string;
+  reviewNote: string | null;
+  reviewedByName: string | null;
+  reviewedAt: string | null;
+  notifiedAt: string | null;
+  likeCount: number;
+  commentCount: number;
+  rsvpCount: number;
+  revisionCount: number;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface PostRevision {
+  id: string;
+  postId: string;
+  action: 'edit' | 'delete' | 'restore' | 'approve' | 'reject';
+  previous: { title: string; body: string; linkUrl: string | null; status: string; eventStartsAt: string | null; eventLocation: string | null };
+  currentTitle: string | null;
+  currentStatus: string | null;
+  postDeleted: boolean;
+  changedByName: string | null;
+  createdAt: string;
+}
+
+export interface RemovedComment {
+  id: string;
+  postId: string;
+  postTitle: string;
+  body: string;
+  authorName: string | null;
+  removedByName: string | null;
+  createdAt: string;
+  removedAt: string;
 }
 
 export type LinkState = 'pending' | 'linked' | 'conflict' | 'unlinked' | 'not_applicable';
@@ -389,6 +483,9 @@ export interface AdminCommunityAccount {
   emailDiffersFromContact: boolean;
   hasResume: boolean;
   resumeName: string | null;
+  resumePublic: boolean;
+  postPermissionOverride: PostPermission | null;
+  postPermission: PostPermission;
   createdAt: string;
   activatedAt: string | null;
   lastLoginAt: string | null;

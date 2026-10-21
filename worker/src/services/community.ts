@@ -40,7 +40,10 @@ export const CREATED_ACCOUNT_TAG = 'Created Account';
 export const ACCOUNT_TYPES = ['student', 'mentor'] as const;
 export type AccountType = (typeof ACCOUNT_TYPES)[number] | 'staff';
 
-/** The shared public matching taxonomy, created per tenant on first use. */
+/**
+ * The shared public matching taxonomy, created per tenant on first use.
+ * Featured topics are shown first; the rest sit behind "See more".
+ */
 export const DEFAULT_INTEREST_TAGS = [
   'Entrepreneurship',
   'Marketing',
@@ -58,6 +61,35 @@ export const DEFAULT_INTEREST_TAGS = [
   'Data & analytics',
 ] as const;
 
+export const MORE_INTEREST_TAGS = [
+  'Accounting',
+  'Artificial intelligence',
+  'Arts & entertainment',
+  'Biotech & life sciences',
+  'Consulting',
+  'Cybersecurity',
+  'E-commerce',
+  'Education',
+  'Energy & sustainability',
+  'Engineering',
+  'Food & agriculture',
+  'Healthcare',
+  'Hospitality & tourism',
+  'Human resources',
+  'Manufacturing',
+  'Media & communications',
+  'Nonprofit management',
+  'Public policy',
+  'Real estate',
+  'Research',
+  'Software engineering',
+  'Sports business',
+  'Supply chain',
+  'UX & user research',
+  'Venture capital',
+  'Writing & content',
+] as const;
+
 export function slugify(label: string): string {
   return label
     .toLowerCase()
@@ -66,17 +98,23 @@ export function slugify(label: string): string {
     .replace(/^-+|-+$/g, '');
 }
 
+/** Adds any default topics this tenant is missing (idempotent; existing topics are untouched). */
 export async function ensureDefaultTags(db: Db, customerId: string): Promise<void> {
+  const total = DEFAULT_INTEREST_TAGS.length + MORE_INTEREST_TAGS.length;
   const existing = await db.get<{ total: unknown }>(
     `SELECT COUNT(*) AS total FROM interest_tags WHERE customer_id = ?`,
     [customerId],
   );
-  if (Number(existing?.total ?? 0) > 0) return;
+  if (Number(existing?.total ?? 0) >= total) return;
   const timestamp = nowIso();
   await db.batch(
-    DEFAULT_INTEREST_TAGS.map((label) => ({
-      sql: `INSERT OR IGNORE INTO interest_tags (id, customer_id, slug, label, created_at) VALUES (?, ?, ?, ?, ?)`,
-      params: [newId(), customerId, slugify(label), label, timestamp],
+    [
+      ...DEFAULT_INTEREST_TAGS.map((label) => ({ label, featured: 1 })),
+      ...MORE_INTEREST_TAGS.map((label) => ({ label, featured: 0 })),
+    ].map(({ label, featured }) => ({
+      sql: `INSERT OR IGNORE INTO interest_tags (id, customer_id, slug, label, featured, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)`,
+      params: [newId(), customerId, slugify(label), label, featured, timestamp],
     })),
   );
 }
@@ -417,7 +455,8 @@ export async function loadTags(db: Db, userIds: string[]): Promise<Map<string, M
 /** Columns a public profile is built from. Nothing private or staff-only is selected. */
 export const PUBLIC_PROFILE_COLUMNS = `
   p.user_id, p.first_name, p.last_name, p.bio, p.linkedin_url, p.photo_key, p.major,
-  p.graduation_year, p.role_title, p.company, p.scheduling_url, ca.account_type, ca.status`;
+  p.graduation_year, p.role_title, p.company, p.scheduling_url, ca.account_type, ca.status,
+  (ca.resume_public = 1 AND ca.resume_key IS NOT NULL) AS public_resume`;
 
 const PHOTO_URL_TTL_SECONDS = 60 * 60 * 6;
 
@@ -450,6 +489,8 @@ export async function publicMemberOut(ctx: Ctx, row: Record<string, unknown>, ta
     schedulingUrl: type === 'mentor' && row.scheduling_url ? String(row.scheduling_url) : null,
     interests: tags?.interests ?? [],
     help: tags?.help ?? [],
+    // Only true when the member chose to share it; the file itself is fetched separately.
+    hasPublicResume: available && Number(row.public_resume ?? 0) === 1,
     available,
   };
 }

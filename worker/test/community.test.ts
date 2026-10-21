@@ -378,15 +378,17 @@ describe('public profiles and private data', () => {
     const profile = await api('GET', `/api/community/members/${mentor.userId}`, undefined, viewer.token);
     for (const payload of [JSON.stringify(list.body), JSON.stringify(profile.body)]) {
       assert.ok(!payload.includes('@example.'), 'no email addresses');
-      assert.ok(!/resume|cv\.pdf/i.test(payload), 'no resume');
+      // The resume stays private unless the member opts in: no file name, key or link.
+      assert.ok(!/cv\.pdf|resume_key|\/files\/resume/i.test(payload), 'no resume file');
       assert.ok(!payload.includes('Created Account'), 'no internal CRM tags');
       assert.ok(!/contactId|how_?we_?connected|"phone"|"email"/i.test(payload), 'no CRM fields');
     }
     assert.equal(profile.body.member.bio, 'I help founders.');
     assert.deepEqual(Object.keys(profile.body.member).sort(), [
-      'accountType', 'available', 'bio', 'company', 'firstName', 'fullName', 'graduationYear', 'help', 'id',
-      'interests', 'lastName', 'linkedinUrl', 'major', 'photoUrl', 'roleTitle', 'schedulingUrl',
+      'accountType', 'available', 'bio', 'company', 'firstName', 'fullName', 'graduationYear', 'hasPublicResume',
+      'help', 'id', 'interests', 'lastName', 'linkedinUrl', 'major', 'photoUrl', 'roleTitle', 'schedulingUrl',
     ]);
+    assert.equal(profile.body.member.hasPublicResume, false, 'resumes are private by default');
   });
 
   it('CRM contacts without accounts never become public profiles', async () => {
@@ -521,7 +523,7 @@ describe('admin-authored feed', () => {
     const ids = events.body.events.map((e: any) => e.id);
     assert.ok(ids.includes(shown.body.event.id));
     assert.ok(!ids.includes(hidden.body.event.id));
-    assert.deepEqual(Object.keys(events.body.events[0]).sort(), ['endsAt', 'id', 'location', 'name', 'startsAt']);
+    assert.deepEqual(Object.keys(events.body.events[0]).sort(), ['endsAt', 'id', 'location', 'name', 'source', 'startsAt']);
     // A post cannot be linked to a hidden event.
     const linked = await api('POST', '/api/admin/posts', { title: 'x', body: 'y', eventId: hidden.body.event.id });
     assert.equal(linked.status, 400);

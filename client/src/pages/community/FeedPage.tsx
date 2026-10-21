@@ -1,96 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { MemberAvatar, accountTypeLabel } from '../../components/community.tsx';
+import { DateBadge, MemberPostEditor, PostCard } from '../../components/posts.tsx';
 import { EmptyState, ErrorBlock, LoadingBlock, Spinner } from '../../components/ui.tsx';
 import { ApiError, api } from '../../lib/api.ts';
-import { formatDate, formatRelative, formatTime } from '../../lib/format.ts';
+import { formatTime } from '../../lib/format.ts';
 import { useApi } from '../../lib/hooks.ts';
 import type { CommunityEvent, FeedPost } from '../../lib/types.ts';
 import { useAuth } from '../../state/AuthContext.tsx';
 
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
-function DateBadge({ iso }: { iso: string }) {
-  const date = new Date(iso);
-  return (
-    <span className="flex h-12 w-12 shrink-0 flex-col items-center justify-center rounded-lg bg-navy-50 text-navy-700" aria-hidden="true">
-      <span className="text-[10px] font-bold uppercase tracking-wide">{MONTHS[date.getMonth()]}</span>
-      <span className="text-lg font-bold leading-none">{date.getDate()}</span>
-    </span>
-  );
-}
-
-function hostOf(url: string): string {
-  try {
-    return new URL(url).hostname.replace(/^www\./, '');
-  } catch {
-    return url;
-  }
-}
-
-function PostCard({ post }: { post: FeedPost }) {
-  const paragraphs = post.body.split(/\n{2,}/).filter((p) => p.trim());
-  return (
-    <article className="card overflow-hidden" aria-labelledby={`post-${post.id}`}>
-      <div className="p-5 sm:p-6">
-        <header className="flex items-center gap-3">
-          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-navy text-xs font-bold text-white" aria-hidden="true">
-            UNH
-          </span>
-          <div className="min-w-0">
-            <p className="truncate text-sm font-semibold text-navy-800">{post.authorName}</p>
-            <p className="text-xs text-slate-500">
-              <time dateTime={post.publishedAt} title={`${formatDate(post.publishedAt)} at ${formatTime(post.publishedAt)}`}>
-                {formatRelative(post.publishedAt)}
-              </time>
-              {' · UNH ECenter'}
-            </p>
-          </div>
-        </header>
-        <h2 id={`post-${post.id}`} className="mt-4 text-xl font-bold text-navy-800">
-          {post.title}
-        </h2>
-        <div className="mt-2 space-y-3 text-[15px] leading-relaxed text-slate-700">
-          {paragraphs.map((paragraph, index) => (
-            <p key={index} className="whitespace-pre-line">
-              {paragraph}
-            </p>
-          ))}
-        </div>
-      </div>
-
-      {post.imageUrl && <img src={post.imageUrl} alt="" className="max-h-[420px] w-full border-y border-slate-100 object-cover" loading="lazy" />}
-
-      {(post.linkUrl || post.event) && (
-        <div className="space-y-3 p-5 pt-4 sm:px-6">
-          {post.event && (
-            <div className="flex items-center gap-3 rounded-lg border border-slate-200 p-3">
-              <DateBadge iso={post.event.startsAt} />
-              <div className="min-w-0">
-                <p className="text-xs font-bold uppercase tracking-wide text-teal-700">Event</p>
-                <p className="truncate font-semibold text-navy-800">{post.event.name}</p>
-                <p className="truncate text-xs text-slate-500">
-                  {formatDate(post.event.startsAt)} · {formatTime(post.event.startsAt)}
-                  {post.event.location ? ` · ${post.event.location}` : ''}
-                </p>
-              </div>
-            </div>
-          )}
-          {post.linkUrl && (
-            <a
-              href={post.linkUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 text-sm font-semibold text-teal-700 hover:underline"
-            >
-              {hostOf(post.linkUrl)} <span aria-hidden="true">↗</span>
-              <span className="sr-only">(opens in a new tab)</span>
-            </a>
-          )}
-        </div>
-      )}
-    </article>
-  );
+export function eventHref(event: CommunityEvent): string {
+  return event.source === 'post' ? `/posts/${event.id}` : `/events/${event.id}`;
 }
 
 function ProfileSummary() {
@@ -99,6 +19,7 @@ function ProfileSummary() {
   const links = [
     { to: '/mentorship', label: 'Mentorship' },
     { to: '/network', label: 'Network' },
+    ...(community && community.postPermission !== 'none' ? [{ to: '/my-posts', label: 'My posts' }] : []),
     { to: '/profile', label: 'My profile' },
   ];
   return (
@@ -113,7 +34,8 @@ function ProfileSummary() {
         {!community && isStaff && (
           <p className="mt-2 text-xs text-slate-500">
             You're browsing as staff.{' '}
-            <Link to="/profile" className="font-semibold text-teal-700 hover:underline">Create a community profile</Link> to message members.
+            <Link to="/profile" className="font-semibold text-teal-700 hover:underline">Create a community profile</Link> to message,
+            comment and like.
           </p>
         )}
       </div>
@@ -128,26 +50,64 @@ function ProfileSummary() {
   );
 }
 
-function UpcomingEvents() {
-  const { data, loading, error } = useApi<{ events: CommunityEvent[] }>('/community/events?limit=5');
-  if (loading) return <div className="card p-5"><Spinner label="Loading events" /></div>;
-  if (error || !data?.events.length) return null;
+export function UpcomingEvents({ limit = 5, compact }: { limit?: number; compact?: boolean }) {
+  const { data, loading, error, reload } = useApi<{ events: CommunityEvent[] }>(`/community/events?limit=${limit}`);
   return (
-    <section className="card p-5" aria-labelledby="upcoming-events">
+    <section className={compact ? '' : 'card p-5'} aria-labelledby="upcoming-events">
       <h2 id="upcoming-events" className="text-sm font-bold uppercase tracking-wide text-navy-800">
         Upcoming events
       </h2>
-      <ul className="mt-3 space-y-4">
+      {loading && <div className="mt-3"><Spinner label="Loading events" /></div>}
+      {error && (
+        <p className="mt-3 text-sm text-slate-500">
+          Events could not be loaded.{' '}
+          <button type="button" className="font-semibold text-teal-700 underline" onClick={reload}>Try again</button>
+        </p>
+      )}
+      {data && data.events.length === 0 && (
+        <p className="mt-3 text-sm text-slate-500">No upcoming events yet. Check back soon — new events show up here.</p>
+      )}
+      {data && data.events.length > 0 && (
+        <ul className="mt-3 space-y-1">
+          {data.events.map((event) => (
+            <li key={`${event.source}-${event.id}`}>
+              <Link to={eventHref(event)} className="-mx-2 flex gap-3 rounded-lg p-2 transition hover:bg-slate-50">
+                <DateBadge iso={event.startsAt} />
+                <span className="min-w-0">
+                  <span className="block font-semibold leading-snug text-navy-800">{event.name}</span>
+                  <span className="block text-xs text-slate-500">
+                    <time dateTime={event.startsAt}>{formatTime(event.startsAt)}</time>
+                    {event.location ? ` · ${event.location}` : ''}
+                  </span>
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function UpcomingEventsStrip() {
+  const { data } = useApi<{ events: CommunityEvent[] }>('/community/events?limit=8');
+  if (!data || data.events.length === 0) return null;
+  return (
+    <section className="lg:hidden" aria-labelledby="events-strip">
+      <h2 id="events-strip" className="mb-2 px-1 text-xs font-bold uppercase tracking-wide text-navy-800">Upcoming events</h2>
+      <ul className="no-scrollbar -mx-3 flex snap-x snap-mandatory gap-3 overflow-x-auto px-3 pb-1 sm:-mx-4 sm:px-4">
         {data.events.map((event) => (
-          <li key={event.id} className="flex gap-3">
-            <DateBadge iso={event.startsAt} />
-            <div className="min-w-0">
-              <p className="font-semibold leading-snug text-navy-800">{event.name}</p>
-              <p className="text-xs text-slate-500">
-                <time dateTime={event.startsAt}>{formatTime(event.startsAt)}</time>
-                {event.location ? ` · ${event.location}` : ''}
-              </p>
-            </div>
+          <li key={`${event.source}-${event.id}`} className="w-64 shrink-0 snap-start">
+            <Link to={eventHref(event)} className="card flex h-full items-center gap-3 p-3 active:bg-slate-50">
+              <DateBadge iso={event.startsAt} />
+              <span className="min-w-0">
+                <span className="line-clamp-2 text-sm font-semibold leading-snug text-navy-800">{event.name}</span>
+                <span className="block truncate text-xs text-slate-500">
+                  {formatTime(event.startsAt)}
+                  {event.location ? ` · ${event.location}` : ''}
+                </span>
+              </span>
+            </Link>
           </li>
         ))}
       </ul>
@@ -155,12 +115,32 @@ function UpcomingEvents() {
   );
 }
 
+function ShareBox({ onCreate }: { onCreate: () => void }) {
+  const { community } = useAuth();
+  if (!community || community.postPermission === 'none') return null;
+  const name = `${community.profile.firstName} ${community.profile.lastName}`;
+  return (
+    <div className="card flex items-center gap-3 p-3 sm:p-4">
+      <MemberAvatar name={name} photoUrl={community.profile.photoUrl} size="sm" />
+      <button
+        type="button"
+        onClick={onCreate}
+        className="min-h-[44px] flex-1 rounded-full border border-slate-300 px-4 text-left text-sm text-slate-500 transition hover:border-teal-200 hover:bg-slate-50"
+      >
+        Share a post or event...
+      </button>
+    </div>
+  );
+}
+
 export function FeedPage() {
+  const { community } = useAuth();
   const [posts, setPosts] = useState<FeedPost[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [composing, setComposing] = useState(false);
   const loaded = useRef(false);
 
   const load = useCallback(async (after: string | null) => {
@@ -196,17 +176,25 @@ export function FeedPage() {
     }
   }
 
+  const patch = (id: string) => (change: Partial<FeedPost>) =>
+    setPosts((current) => current.map((p) => (p.id === id ? { ...p, ...change } : p)));
+
   return (
-    <div className="grid gap-6 lg:grid-cols-[240px_minmax(0,1fr)_280px]">
-      <section className="min-w-0 space-y-5 lg:order-2" aria-label="Community feed">
+    <div className="grid grid-cols-1 gap-6 lg:grid-cols-[240px_minmax(0,1fr)_300px]">
+      <section className="min-w-0 space-y-4 sm:space-y-5 lg:order-2" aria-label="Community feed">
         <h1 className="sr-only">Community feed</h1>
+        <ShareBox onCreate={() => setComposing(true)} />
+
+        {/* On phones and tablets, events are a compact swipeable strip so the feed stays first. */}
+        <UpcomingEventsStrip />
+
         {loading && <LoadingBlock label="Loading the feed" />}
         {!loading && error && !posts.length && <ErrorBlock message={error} onRetry={initial} />}
         {!loading && !error && posts.length === 0 && (
-          <EmptyState title="Nothing posted yet" message="News and announcements from the ECenter will appear here." icon="▤" />
+          <EmptyState title="Nothing posted yet" message="News, events and posts from the community will appear here." icon="▤" />
         )}
         {posts.map((post) => (
-          <PostCard key={post.id} post={post} />
+          <PostCard key={post.id} post={post} onChange={patch(post.id)} />
         ))}
         {cursor && (
           <div className="flex justify-center">
@@ -218,17 +206,29 @@ export function FeedPage() {
         {error && posts.length > 0 && <p className="text-center text-sm text-urgent" role="alert">{error}</p>}
       </section>
 
-      <aside className="lg:order-1">
+      <aside className="hidden lg:order-1 lg:block">
         <div className="lg:sticky lg:top-28">
           <ProfileSummary />
         </div>
       </aside>
 
-      <aside className="lg:order-3">
+      <aside className="hidden lg:order-3 lg:block">
         <div className="lg:sticky lg:top-28">
           <UpcomingEvents />
         </div>
       </aside>
+
+      {composing && community && (
+        <MemberPostEditor
+          post={null}
+          needsApproval={community.postPermission === 'approval'}
+          onClose={() => setComposing(false)}
+          onSaved={(saved) => {
+            setComposing(false);
+            if (saved.status === 'published') setPosts((current) => [saved, ...current]);
+          }}
+        />
+      )}
     </div>
   );
 }

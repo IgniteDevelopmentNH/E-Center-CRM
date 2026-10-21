@@ -23,6 +23,7 @@ import { useApi, useDebounced } from '../lib/hooks.ts';
 import type { Contact, CrmDocument, Organization, OrganizationsResponse } from '../lib/types.ts';
 import { useAuth } from '../state/AuthContext.tsx';
 import { useToast } from '../state/ToastContext.tsx';
+import { Combobox } from '../components/Combobox.tsx';
 
 const SORT_OPTIONS = [
   { value: 'name', label: 'Name (A-Z)' },
@@ -606,15 +607,16 @@ function OrganizationPanel({
         <div className="space-y-4">
           <label className="block">
             <span className="label">Contact</span>
-            <select className="input pr-8" value={linkId} onChange={(event) => setLinkId(event.target.value)}>
-              <option value="">Choose a contact</option>
-              {unlinked.map((contact) => (
-                <option key={contact.id} value={contact.id}>
-                  {contact.fullName}
-                  {contact.organizationName ? ` (currently ${contact.organizationName})` : ''}
-                </option>
-              ))}
-            </select>
+            <Combobox
+              value={linkId}
+              options={unlinked.map((contact) => ({
+                value: contact.id,
+                label: contact.fullName,
+                sublabel: contact.organizationName ? `currently ${contact.organizationName}` : null,
+              }))}
+              placeholder="Search contacts"
+              onChange={setLinkId}
+            />
           </label>
           <label className="block">
             <span className="label">Role there</span>

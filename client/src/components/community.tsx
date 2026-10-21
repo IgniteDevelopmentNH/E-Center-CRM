@@ -102,8 +102,16 @@ export function TopicPicker({
 }) {
   const { tags, loading, error } = useInterestTags();
   const [query, setQuery] = useState('');
+  const [showAll, setShowAll] = useState(false);
   const q = query.trim().toLowerCase();
-  const filtered = q ? tags.filter((tag) => tag.label.toLowerCase().includes(q)) : tags;
+  const hiddenCount = tags.filter((tag) => tag.featured === false).length;
+  // Featured topics first; the rest appear after "See more" (or when searching,
+  // or when already selected).
+  const filtered = q
+    ? tags.filter((tag) => tag.label.toLowerCase().includes(q))
+    : showAll
+      ? tags
+      : tags.filter((tag) => tag.featured !== false || value.includes(tag.slug));
   const atMax = value.length >= max;
 
   const toggle = (slug: string) =>
@@ -145,6 +153,16 @@ export function TopicPicker({
             </button>
           );
         })}
+        {!q && hiddenCount > 0 && (
+          <button
+            type="button"
+            onClick={() => setShowAll((v) => !v)}
+            aria-expanded={showAll}
+            className="chip min-h-[36px] border border-dashed border-navy-200 bg-navy-50 px-3 font-semibold text-navy-700 transition hover:bg-navy-100"
+          >
+            {showAll ? 'See fewer' : `See more (${hiddenCount})`}
+          </button>
+        )}
         {!loading && filtered.length === 0 && <p className="text-sm text-slate-500">No topics match that.</p>}
       </div>
       <p className="mt-1.5 text-xs text-slate-500" aria-live="polite">
@@ -158,7 +176,11 @@ export function TopicPicker({
 export function TopicFilter({ value, onChange }: { value: string; onChange: (slug: string) => void }) {
   const { tags } = useInterestTags();
   const [expanded, setExpanded] = useState(false);
-  const visible = expanded ? tags : tags.slice(0, 8);
+  const featured = tags.filter((tag) => tag.featured !== false);
+  const preview = featured.slice(0, 8);
+  // Keep a selected topic visible even when the list is collapsed.
+  const selected = tags.find((tag) => tag.slug === value);
+  const visible = expanded ? tags : selected && !preview.includes(selected) ? [...preview, selected] : preview;
   const chip = (slug: string, text: string) => (
     <button
       key={slug}
@@ -176,9 +198,14 @@ export function TopicFilter({ value, onChange }: { value: string; onChange: (slu
     <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Filter by topic">
       {chip('all', 'All topics')}
       {visible.map((tag) => chip(tag.slug, tag.label))}
-      {tags.length > 8 && (
-        <button type="button" className="btn-quiet text-xs" onClick={() => setExpanded((v) => !v)} aria-expanded={expanded}>
-          {expanded ? 'Fewer' : `+${tags.length - 8} more`}
+      {tags.length > preview.length && (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          aria-expanded={expanded}
+          className="chip min-h-[32px] border border-dashed border-navy-200 bg-navy-50 px-3 font-semibold text-navy-700 transition hover:bg-navy-100"
+        >
+          {expanded ? 'See fewer' : 'See more'}
         </button>
       )}
     </div>

@@ -40,6 +40,12 @@ function isoDaysAhead(days: number, hour = 17, minute = 0): string {
 }
 
 const CUSTOMER_SCOPED_TABLES = [
+  'email_outbox',
+  'event_rsvps',
+  'post_mentions',
+  'post_likes',
+  'post_comments',
+  'post_revisions',
   'messages',
   'conversation_members',
   'conversations',
@@ -971,6 +977,76 @@ export async function seedCommunityDemo(db: Db, customerId: string): Promise<voi
       ],
     );
   }
+
+  // v2 demo: interactions, an event post with RSVPs, and a mentor post awaiting approval.
+  const idFor = async (email: string) => (await db.get<{ id: string }>(`SELECT id FROM users WHERE email = ?`, [email]))!.id;
+  const maya = await idFor('maya.chen@example.org');
+  const priya = await idFor('priya.raghavan@example.com');
+  const jordan = await idFor('jordan.lee@example.org');
+  const welcome = (await db.get<{ id: string }>(
+    `SELECT id FROM posts WHERE customer_id = ? AND title = 'Welcome to the ECenter community'`,
+    [customerId],
+  ))!.id;
+
+  const comment1 = newId();
+  const comment2 = newId();
+  await db.batch([
+    {
+      sql: `INSERT INTO post_comments (id, customer_id, post_id, user_id, parent_id, body, created_at, updated_at)
+            VALUES (?, ?, ?, ?, NULL, ?, ?, ?)`,
+      params: [comment1, customerId, welcome, maya, 'Excited to be here! Looking for help with go-to-market.', isoDaysAgo(5), isoDaysAgo(5)],
+    },
+    {
+      sql: `INSERT INTO post_comments (id, customer_id, post_id, user_id, parent_id, body, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      params: [comment2, customerId, welcome, priya, comment1, `Welcome @[Maya Chen](user:${maya})! Happy to look at your plan.`, isoDaysAgo(4), isoDaysAgo(4)],
+    },
+    {
+      sql: `INSERT INTO post_mentions (source_type, source_id, user_id, customer_id, created_at) VALUES ('comment', ?, ?, ?, ?)`,
+      params: [comment2, maya, customerId, isoDaysAgo(4)],
+    },
+    ...[maya, jordan, priya].map((userId) => ({
+      sql: `INSERT INTO post_likes (post_id, user_id, customer_id, created_at) VALUES (?, ?, ?, ?)`,
+      params: [welcome, userId, customerId, isoDaysAgo(3)],
+    })),
+  ]);
+
+  const dinner = newId();
+  const dinnerAt = isoDaysAhead(9, 18, 0);
+  await db.run(
+    `INSERT INTO posts (id, customer_id, title, body, status, published_at, author_id, author_kind,
+                        event_starts_at, event_ends_at, event_location, rsvp_enabled,
+                        created_at, updated_at, created_by, last_edited_by)
+     VALUES (?, ?, ?, ?, 'published', ?, ?, 'staff', ?, ?, ?, 1, ?, ?, ?, ?)`,
+    [
+      dinner, customerId, 'Founder dinner: stories from the trenches',
+      'An informal dinner with three local founders. Bring your questions.\n\nSpace is limited, so let us know if you will be there.',
+      isoDaysAgo(1, 9, 0), lisa, dinnerAt, isoDaysAhead(9, 20, 0), 'Paul College, Room 120', isoDaysAgo(1, 9, 0),
+      isoDaysAgo(1, 9, 0), lisa, lisa,
+    ],
+  );
+  await db.run(
+    `INSERT INTO event_rsvps (target_type, target_id, user_id, customer_id, created_at) VALUES ('post', ?, ?, ?, ?)`,
+    [dinner, maya, customerId, timestamp],
+  );
+
+  await db.run(
+    `INSERT INTO posts (id, customer_id, title, body, status, author_id, author_kind, created_at, updated_at, created_by, last_edited_by)
+     VALUES (?, ?, ?, ?, 'pending', ?, 'member', ?, ?, ?, ?)`,
+    [
+      newId(), customerId, 'Positioning workshop for student founders',
+      'I am running a 45-minute session on brand positioning next week. Bring a one-line description of your idea.',
+      jordan, timestamp, timestamp, jordan, jordan,
+    ],
+  );
+
+  // Community events take RSVPs and carry a public description.
+  await db.run(
+    `UPDATE events SET community_rsvp = 1,
+            community_details = COALESCE(community_details, 'Open to all ECenter community members. Bring a friend!')
+      WHERE customer_id = ? AND community_visible = 1`,
+    [customerId],
+  );
 }
 
 async function main(): Promise<void> {
