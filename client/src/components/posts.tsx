@@ -454,7 +454,6 @@ export function MemberPostEditor({
   const [linkUrl, setLinkUrl] = useState(post?.linkUrl ?? '');
   const [isEvent, setIsEvent] = useState(!!post?.event);
   const [startsAt, setStartsAt] = useState(toDateTimeInput(post?.event?.startsAt ?? null));
-  const [endsAt, setEndsAt] = useState(toDateTimeInput(post?.event?.endsAt ?? null));
   const [location, setLocation] = useState(post?.event?.location ?? '');
   const [rsvpEnabled, setRsvpEnabled] = useState(post?.event?.rsvpEnabled ?? true);
   const [image, setImage] = useState<File | null>(null);
@@ -475,7 +474,6 @@ export function MemberPostEditor({
         linkUrl,
         isEvent,
         eventStartsAt: isEvent && startsAt ? new Date(startsAt).toISOString() : null,
-        eventEndsAt: isEvent && endsAt ? new Date(endsAt).toISOString() : null,
         eventLocation: isEvent ? location : null,
         rsvpEnabled: isEvent && rsvpEnabled,
       };
@@ -536,14 +534,9 @@ export function MemberPostEditor({
           <Checkbox label="This is an event" checked={isEvent} onChange={setIsEvent} />
           {isEvent && (
             <div className="mt-2 space-y-3 rounded-lg border border-slate-200 p-3">
-              <div className="grid gap-3 sm:grid-cols-2">
-                <Field label="Starts" required error={errorFor('Event start')}>
-                  <TextInput type="datetime-local" value={startsAt} onChange={(e) => setStartsAt(e.target.value)} invalid={!!errorFor('Event start')} />
-                </Field>
-                <Field label="Ends" error={errorFor('Event end')}>
-                  <TextInput type="datetime-local" value={endsAt} onChange={(e) => setEndsAt(e.target.value)} invalid={!!errorFor('Event end')} />
-                </Field>
-              </div>
+              <Field label="Date & time" required error={errorFor('Event start')}>
+                <TextInput type="datetime-local" value={startsAt} onChange={(e) => setStartsAt(e.target.value)} invalid={!!errorFor('Event start')} />
+              </Field>
               <Field label="Location" error={errorFor('Event location')}>
                 <TextInput value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Room, building or online link" />
               </Field>

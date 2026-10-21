@@ -315,7 +315,6 @@ function PostEditor({ post, onClose, onSaved }: { post: AdminPost | null; onClos
   const [mode, setMode] = useState<EventMode>(post?.eventDetails ? 'own' : post?.eventId ? 'linked' : 'none');
   const [eventId, setEventId] = useState(post?.eventId ?? '');
   const [startsAt, setStartsAt] = useState(toDateTimeInput(post?.eventDetails?.startsAt ?? null));
-  const [endsAt, setEndsAt] = useState(toDateTimeInput(post?.eventDetails?.endsAt ?? null));
   const [location, setLocation] = useState(post?.eventDetails?.location ?? '');
   const [rsvpEnabled, setRsvpEnabled] = useState(post?.eventDetails?.rsvpEnabled ?? true);
   const [notify, setNotify] = useState(false);
@@ -344,7 +343,6 @@ function PostEditor({ post, onClose, onSaved }: { post: AdminPost | null; onClos
         eventId: mode === 'linked' ? eventId || null : null,
         isEvent: mode === 'own',
         eventStartsAt: mode === 'own' && startsAt ? new Date(startsAt).toISOString() : null,
-        eventEndsAt: mode === 'own' && endsAt ? new Date(endsAt).toISOString() : null,
         eventLocation: mode === 'own' ? location : null,
         rsvpEnabled: mode === 'own' && rsvpEnabled,
       };
@@ -438,14 +436,9 @@ function PostEditor({ post, onClose, onSaved }: { post: AdminPost | null; onClos
           </div>
           {mode === 'own' && (
             <div className="mt-3 space-y-3 rounded-lg border border-slate-200 p-3">
-              <div className="grid gap-3 sm:grid-cols-2">
-                <Field label="Starts" required error={errorFor('Event start')}>
-                  <TextInput type="datetime-local" value={startsAt} onChange={(e) => setStartsAt(e.target.value)} invalid={!!errorFor('Event start')} />
-                </Field>
-                <Field label="Ends" error={errorFor('Event end')}>
-                  <TextInput type="datetime-local" value={endsAt} onChange={(e) => setEndsAt(e.target.value)} />
-                </Field>
-              </div>
+              <Field label="Date & time" required error={errorFor('Event start')}>
+                <TextInput type="datetime-local" value={startsAt} onChange={(e) => setStartsAt(e.target.value)} invalid={!!errorFor('Event start')} />
+              </Field>
               <Field label="Location">
                 <TextInput value={location} onChange={(e) => setLocation(e.target.value)} />
               </Field>

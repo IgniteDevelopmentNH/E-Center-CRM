@@ -272,8 +272,8 @@ export function register(router: Router): void {
 
   /**
    * Posting permission for one member: 'none' | 'approval' | 'direct', or
-   * 'default' to go back to the account-type default (students none,
-   * mentors approval). Owners and editors only.
+   * 'default' to go back to the account-type default (students and mentors
+   * cannot post). Owners and editors only.
    */
   router.put('/api/admin/community/accounts/:userId/permissions', async (ctx: Ctx) => {
     const { customerId, userId } = requireEditor(ctx);

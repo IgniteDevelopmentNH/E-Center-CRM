@@ -265,18 +265,20 @@ export function register(router: Router): void {
     const { auth } = await requireCommunityViewer(ctx);
     const limit = positiveInt(ctx.query.get('limit'), 5, 30);
     const now = nowIso();
+    // Events with a single date & time stay listed for a few hours after they start.
+    const startedSince = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
     const rows = await ctx.db.all<Record<string, unknown>>(
       `SELECT * FROM (
          SELECT 'event' AS source, id, name, starts_at, ends_at, location FROM events
           WHERE customer_id = ? AND deleted_at IS NULL AND community_visible = 1
-            AND COALESCE(ends_at, starts_at) >= ?
+            AND (ends_at >= ? OR (ends_at IS NULL AND starts_at >= ?))
          UNION ALL
          SELECT 'post' AS source, id, title AS name, event_starts_at AS starts_at, event_ends_at AS ends_at,
                 event_location AS location FROM posts
-          WHERE customer_id = ? AND deleted_at IS NULL AND status = 'published'
-            AND event_starts_at IS NOT NULL AND COALESCE(event_ends_at, event_starts_at) >= ?
+          WHERE customer_id = ? AND deleted_at IS NULL AND status = 'published' AND event_starts_at IS NOT NULL
+            AND (event_ends_at >= ? OR (event_ends_at IS NULL AND event_starts_at >= ?))
        ) ORDER BY starts_at ASC LIMIT ?`,
-      [auth.customerId, now, auth.customerId, now, limit],
+      [auth.customerId, now, startedSince, auth.customerId, now, startedSince, limit],
     );
     return jsonResponse({ events: rows.map(publicEvent) });
   });

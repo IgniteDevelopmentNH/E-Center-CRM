@@ -38,7 +38,7 @@ function PostingControl({
   busy: boolean;
   onSave: (value: string) => void;
 }) {
-  const typeDefault = account.accountType === 'mentor' ? 'Posts with approval' : account.accountType === 'staff' ? 'Posts without approval' : 'Cannot post';
+  const typeDefault = account.accountType === 'staff' ? 'Posts without approval' : 'Cannot post';
   const options = [
     { value: 'default', label: `Default for ${accountTypeLabel(account.accountType).toLowerCase()}s (${typeDefault.toLowerCase()})` },
     { value: 'none', label: 'Cannot post' },

@@ -15,7 +15,8 @@ import { signValue } from '../lib/signedToken.ts';
  * (from the portal). One set of rules for both:
  *
  *   Posting permission (community_accounts.post_permission, NULL = default)
- *     student -> none        mentor -> approval       staff identity -> direct (editors/owners)
+ *     student -> none        mentor -> none           staff identity -> direct (editors/owners)
+ *   Staff grant posting to individual members in Admin > Members.
  *   none      cannot post
  *   approval  posts (and later edits) wait as `pending` until staff approve
  *   direct    posts publish immediately
@@ -35,7 +36,7 @@ export function effectivePostPermission(
   userRole: string,
 ): PostPermission {
   if (stored && (POST_PERMISSIONS as readonly string[]).includes(stored)) return stored as PostPermission;
-  if (accountType === 'mentor') return 'approval';
+  // Students and mentors cannot post until staff grant it per person.
   if (accountType === 'staff') return isStaffRole(userRole) && userRole !== 'viewer' ? 'direct' : 'none';
   return 'none';
 }
@@ -63,13 +64,11 @@ export async function parsePostFields(db: Db, customerId: string, body: Record<s
   const rawBody = requiredString(body.body, 'Body', { max: 10000 });
   const { text, userIds } = await sanitizeMentions(db, customerId, rawBody);
 
+  // An event post has one date & time for the whole event (no separate end).
   const isEvent = flag(body.isEvent) === 1;
   const eventStartsAt = isEvent ? optionalTimestamp(body.eventStartsAt, 'Event start') : null;
-  if (isEvent && !eventStartsAt) throw badRequest('Choose when the event starts.', 'Event start');
-  const eventEndsAt = isEvent ? optionalTimestamp(body.eventEndsAt, 'Event end') : null;
-  if (eventStartsAt && eventEndsAt && eventEndsAt < eventStartsAt) {
-    throw badRequest('The event ends before it starts.', 'Event end');
-  }
+  if (isEvent && !eventStartsAt) throw badRequest('Choose the date and time of the event.', 'Event start');
+  const eventEndsAt = null;
   return {
     title,
     body: text,

@@ -317,7 +317,7 @@ CREATE TABLE IF NOT EXISTS community_accounts (
   deactivated_at           TEXT,
   deactivated_by           TEXT REFERENCES users(id),
   deactivation_reason      TEXT,
-  -- NULL = account-type default (students: none; mentors: approval).
+  -- NULL = account-type default (students and mentors: none).
   post_permission          TEXT,                             -- none | approval | direct
   resume_public            INTEGER NOT NULL DEFAULT 0,
   notify_messages          INTEGER NOT NULL DEFAULT 1,

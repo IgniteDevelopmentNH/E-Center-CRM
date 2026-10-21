@@ -1021,7 +1021,7 @@ export async function seedCommunityDemo(db: Db, customerId: string): Promise<voi
     [
       dinner, customerId, 'Founder dinner: stories from the trenches',
       'An informal dinner with three local founders. Bring your questions.\n\nSpace is limited, so let us know if you will be there.',
-      isoDaysAgo(1, 9, 0), lisa, dinnerAt, isoDaysAhead(9, 20, 0), 'Paul College, Room 120', isoDaysAgo(1, 9, 0),
+      isoDaysAgo(1, 9, 0), lisa, dinnerAt, null, 'Paul College, Room 120', isoDaysAgo(1, 9, 0),
       isoDaysAgo(1, 9, 0), lisa, lisa,
     ],
   );
@@ -1030,6 +1030,8 @@ export async function seedCommunityDemo(db: Db, customerId: string): Promise<voi
     [dinner, maya, customerId, timestamp],
   );
 
+  // Mentors cannot post by default; the demo grants Jordan "post with approval".
+  await db.run(`UPDATE community_accounts SET post_permission = 'approval' WHERE user_id = ?`, [jordan]);
   await db.run(
     `INSERT INTO posts (id, customer_id, title, body, status, author_id, author_kind, created_at, updated_at, created_by, last_edited_by)
      VALUES (?, ?, ?, ?, 'pending', ?, 'member', ?, ?, ?, ?)`,

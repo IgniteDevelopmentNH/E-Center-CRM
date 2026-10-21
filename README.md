@@ -512,10 +512,9 @@ New audit actions:
 ### Member posts, comments and likes
 
 - **Posting permission** is set per person in Admin > Members > *Posting*:
-  - **Cannot post**: the default for students.
-  - **Post with approval**: the default for mentors. Posts wait in Admin > Posts > *Awaiting approval*
-    until an owner or editor approves or rejects them. A rejection can include a note, which the
-    author sees.
+  - **Cannot post**: the default for students and mentors.
+  - **Post with approval**: posts wait in Admin > Posts > *Awaiting approval* until an owner or
+    editor approves or rejects them. A rejection can include a note, which the author sees.
   - **Post without approval**: posts publish immediately.
   - **Default** follows the account type.
 - Anyone who can post gets a **Posts** item in the portal navigation (`/my-posts`), where they create,

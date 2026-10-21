@@ -18,7 +18,7 @@
 -- 1. Columns on existing tables. ----------------------------------------------
 
 -- Posting permission per member: NULL = the default for their account type
--- (students cannot post; mentors post with approval). Otherwise
+-- (students and mentors cannot post). Otherwise
 -- 'none' | 'approval' | 'direct', set by staff in Admin > Members.
 ALTER TABLE community_accounts ADD COLUMN post_permission TEXT;
 -- Members choose whether their (otherwise private) resume shows on their profile.

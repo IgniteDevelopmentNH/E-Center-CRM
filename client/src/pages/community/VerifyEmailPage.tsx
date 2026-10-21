@@ -41,10 +41,10 @@ export function VerifyEmailPage() {
       {state === 'working' && <Spinner label="Confirming your email" />}
       {state === 'done' && (
         <div role="status">
-          <h2 className="text-2xl font-bold text-navy-800">{isChange ? 'Email updated' : 'Email confirmed'}</h2>
+          <h2 className="text-2xl font-bold text-navy-800">{already ? "You're all set" : isChange ? 'Email updated' : 'Email confirmed'}</h2>
           <p className="mt-2 text-sm text-slate-600">
             {already
-              ? 'This link was already used, and your email is confirmed. You are all set.'
+              ? 'Your email is already confirmed. There is nothing else you need to do with this link.'
               : isChange
                 ? 'Use your new address the next time you sign in.'
                 : 'Thanks! Your email address is confirmed.'}

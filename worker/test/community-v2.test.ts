@@ -128,6 +128,9 @@ before(async () => {
   student = await createMember('student', 'Stella', 'Student', 'stella@example.org');
   mentor = await createMember('mentor', 'Manny', 'Mentor', 'manny@example.org');
   other = await createMember('student', 'Otis', 'Other', 'otis@example.org');
+  // Mentors cannot post by default; most tests below use a mentor staff granted "post with approval".
+  const granted = await api('PUT', `/api/admin/community/accounts/${mentor.userId}/permissions`, { postPermission: 'approval' }, editorToken);
+  assert.equal(granted.status, 200);
 });
 
 after(() => {
@@ -137,11 +140,14 @@ after(() => {
 });
 
 describe('posting permissions and approval', () => {
-  it('defaults: students cannot post, mentors post with approval', async () => {
+  it('defaults: neither students nor mentors can post until staff allow it', async () => {
+    const newMentor = await createMember('mentor', 'Nora', 'Newmentor', 'nora@example.org');
     assert.equal((await api('GET', '/api/auth/me', undefined, student.token)).body.community.postPermission, 'none');
+    assert.equal((await api('GET', '/api/auth/me', undefined, newMentor.token)).body.community.postPermission, 'none');
+    assert.equal((await api('POST', '/api/community/posts', { title: 'Hi', body: 'Hello' }, student.token)).status, 403);
+    assert.equal((await api('POST', '/api/community/posts', { title: 'Hi', body: 'Hello' }, newMentor.token)).status, 403);
+    // The granted mentor can post, with approval.
     assert.equal((await api('GET', '/api/auth/me', undefined, mentor.token)).body.community.postPermission, 'approval');
-    const denied = await api('POST', '/api/community/posts', { title: 'Hi', body: 'Hello' }, student.token);
-    assert.equal(denied.status, 403);
   });
 
   it("a mentor's post waits for staff approval and is invisible until approved", async () => {
@@ -197,9 +203,10 @@ describe('posting permissions and approval', () => {
     await set(mentor, 'none');
     assert.equal((await api('POST', '/api/community/posts', { title: 'x', body: 'y' }, mentor.token)).status, 403);
     const back = await set(mentor, 'default');
-    assert.equal(back.body.account.postPermission, 'approval');
+    assert.equal(back.body.account.postPermission, 'none', 'the mentor default is: cannot post');
     assert.equal(back.body.account.postPermissionOverride, null);
     await set(student, 'default');
+    await set(mentor, 'approval');
   });
 
   it('editing an approved post sends it back for review and keeps the previous version', async () => {
@@ -387,7 +394,7 @@ describe('events and RSVPs', () => {
     const created = await api(
       'POST',
       '/api/admin/posts',
-      { title: 'Founder dinner', body: 'Food and stories', publish: true, isEvent: true, eventStartsAt: startsAt, eventLocation: 'Paul College', rsvpEnabled: true },
+      { title: 'Founder dinner', body: 'Food and stories', publish: true, isEvent: true, eventStartsAt: startsAt, eventEndsAt: startsAt, eventLocation: 'Paul College', rsvpEnabled: true },
       editorToken,
     );
     const id = created.body.post.id;
@@ -395,6 +402,7 @@ describe('events and RSVPs', () => {
     assert.deepEqual(going.body, { going: true, rsvpCount: 1 });
     await api('POST', `/api/community/posts/${id}/rsvp`, { going: true }, student.token);
     const detail = await api('GET', `/api/community/posts/${id}`, undefined, student.token);
+    assert.equal(detail.body.post.event.endsAt, null, 'events have one date & time');
     assert.equal(detail.body.post.event.rsvpCount, 1);
     assert.equal(detail.body.post.event.going, true);
 
