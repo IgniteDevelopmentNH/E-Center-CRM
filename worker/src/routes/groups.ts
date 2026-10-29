@@ -12,7 +12,7 @@ import {
   requireStaff,
 } from '../middleware/auth.ts';
 import type { AuthContext, Ctx, Router } from '../router.ts';
-import { ensureStaffIdentity, photoUrl } from '../services/community.ts';
+import { photoUrl } from '../services/community.ts';
 import {
   canCreateGroups,
   canModerate,
@@ -240,9 +240,11 @@ export function register(router: Router): void {
     if (!(await canCreateGroups(ctx.db, auth))) {
       throw forbidden('Your account cannot create groups. Ask the ECenter if you would like to start one.');
     }
-    // The creator moderates the group, so they need an active community identity.
-    if (isStaffModerator(auth)) await ensureStaffIdentity(ctx.db, { id: auth.userId, customerId: auth.customerId, name: auth.name });
-    else await requireActiveCommunityMember(ctx);
+    // Members who create a group become its moderator. Staff moderate every group anyway, and are
+    // listed as its moderator only if they have a community identity.
+    const creatorAccount = await ctx.db.get<{ status: string }>(`SELECT status FROM community_accounts WHERE user_id = ?`, [auth.userId]);
+    if (!isStaffModerator(auth)) await requireActiveCommunityMember(ctx);
+    const addCreator = creatorAccount?.status === 'active';
     const fields = parseGroupFields(await readJson(ctx.req));
     const clash = await ctx.db.get(
       `SELECT 1 AS taken FROM community_groups WHERE customer_id = ? AND LOWER(name) = LOWER(?) AND archived_at IS NULL`,
@@ -258,11 +260,15 @@ export function register(router: Router): void {
               VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
         params: [id, auth.customerId, slug, fields.name, fields.description, fields.privacy, auth.userId, timestamp, timestamp],
       },
-      {
-        sql: `INSERT INTO group_members (group_id, user_id, customer_id, role, status, requested_at, joined_at)
-              VALUES (?, ?, ?, 'moderator', 'active', ?, ?)`,
-        params: [id, auth.userId, auth.customerId, timestamp, timestamp],
-      },
+      ...(addCreator
+        ? [
+            {
+              sql: `INSERT INTO group_members (group_id, user_id, customer_id, role, status, requested_at, joined_at)
+                    VALUES (?, ?, ?, 'moderator', 'active', ?, ?)`,
+              params: [id, auth.userId, auth.customerId, timestamp, timestamp] as SqlParam[],
+            },
+          ]
+        : []),
     ]);
     await audit(ctx.db, {
       customerId: auth.customerId,

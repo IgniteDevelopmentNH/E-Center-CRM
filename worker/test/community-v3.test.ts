@@ -155,9 +155,10 @@ describe('defaults', () => {
     assert.equal(post.status, 403);
   });
 
-  it('staff accounts appear under ECenter staff in the Network', async () => {
+  it('staff appear under ECenter staff once they create their community profile', async () => {
     await api('GET', '/api/auth/me', undefined, ownerToken);
-    await api('GET', '/api/auth/me', undefined, editorToken);
+    assert.equal(raw().prepare(`SELECT 1 FROM community_accounts WHERE user_id = (SELECT id FROM users WHERE email = 'lisa@unh.edu')`).get(), undefined);
+    assert.equal((await api('POST', '/api/community/staff-identity', undefined, ownerToken)).status, 201);
     const staff = await api('GET', '/api/community/members?type=staff', undefined, student.token);
     assert.equal(staff.status, 200);
     const names = staff.body.members.map((m: { fullName?: string; firstName?: string; name?: string }) => JSON.stringify(m));
@@ -165,12 +166,10 @@ describe('defaults', () => {
     assert.ok(staff.body.members.every((m: { accountType: string }) => m.accountType === 'staff'));
   });
 
-  it('new staff users get a community identity immediately', async () => {
+  it('new staff users do not get a community identity until they create one', async () => {
     const created = await api('POST', '/api/settings/users', { email: 'newstaff@unh.edu', name: 'Nick Staff', role: 'editor', password: 'staffpass1234' });
     assert.equal(created.status, 201);
-    const row = raw().prepare(`SELECT account_type, status FROM community_accounts WHERE user_id = ?`).get(created.body.user.id);
-    assert.equal(row.account_type, 'staff');
-    assert.equal(row.status, 'active');
+    assert.equal(raw().prepare(`SELECT 1 FROM community_accounts WHERE user_id = ?`).get(created.body.user.id), undefined);
   });
 });
 

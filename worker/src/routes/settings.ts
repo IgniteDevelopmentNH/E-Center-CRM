@@ -7,7 +7,6 @@ import { nowIso, todayDate } from '../lib/time.ts';
 import { oneOf, positiveInt, requiredEmail, requiredString } from '../lib/validate.ts';
 import { requireStaff, requireEditor, requireOwner } from '../middleware/auth.ts';
 import { USER_ROLES, userOut } from '../records.ts';
-import { ensureStaffIdentity } from '../services/community.ts';
 import type { Ctx, Router } from '../router.ts';
 import { ALLOWED_TYPES } from '../services/storage.ts';
 
@@ -57,9 +56,6 @@ export function register(router: Router): void {
         params: [id, customerId, timestamp],
       },
     ]);
-
-    // New staff appear under ECenter staff in the community right away.
-    await ensureStaffIdentity(ctx.db, { id, customerId, name });
 
     await audit(ctx.db, {
       customerId,

@@ -1,9 +1,10 @@
 -- Migration: community portal v3 -- event options, guest browsing, blocked
 -- emails, groups, businesses, competitions, and staff in the directory.
 --
--- Purely ADDITIVE: new columns (all defaulted) and new tables, plus two data
--- inserts that only ADD rows (staff community identities, blocked emails for
--- already-deactivated members). Nothing existing is rewritten or dropped.
+-- Purely ADDITIVE: new columns (all defaulted) and new tables, plus one data
+-- insert that only ADDS rows (blocked emails for already-deactivated members).
+-- Nothing existing is rewritten or dropped. (Staff community identities stay
+-- opt-in: each staff member creates theirs from their profile.)
 --
 -- Apply ONCE, after 2026-10-20-community-v2.sql and BEFORE deploying the
 -- matching Worker build:
@@ -159,27 +160,6 @@ CREATE TABLE IF NOT EXISTS competition_deadlines (
 CREATE INDEX IF NOT EXISTS idx_competition_deadlines_due ON competition_deadlines(customer_id, due_at);
 
 -- 3. Data (inserts only). --------------------------------------------------------
-
--- Every existing staff user gets an active "ECenter staff" community identity,
--- so they appear under ECenter staff in the Network directory. Names are split
--- at the first space. (New staff get one automatically from the app.)
-INSERT INTO community_accounts
-  (user_id, customer_id, account_type, status, onboarding_completed_at, activated_at, link_state, created_at, updated_at)
-SELECT u.id, u.customer_id, 'staff', 'active',
-       strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), 'not_applicable',
-       strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-  FROM users u
- WHERE u.role IN ('owner', 'editor', 'viewer') AND u.deleted_at IS NULL
-   AND NOT EXISTS (SELECT 1 FROM community_accounts ca WHERE ca.user_id = u.id);
-
-INSERT INTO community_profiles (user_id, customer_id, first_name, last_name, updated_at)
-SELECT u.id, u.customer_id,
-       CASE WHEN instr(trim(u.name), ' ') > 0 THEN substr(trim(u.name), 1, instr(trim(u.name), ' ') - 1) ELSE trim(u.name) END,
-       CASE WHEN instr(trim(u.name), ' ') > 0 THEN trim(substr(trim(u.name), instr(trim(u.name), ' ') + 1)) ELSE '' END,
-       strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-  FROM users u
- WHERE u.role IN ('owner', 'editor', 'viewer') AND u.deleted_at IS NULL
-   AND NOT EXISTS (SELECT 1 FROM community_profiles p WHERE p.user_id = u.id);
 
 -- Members who were already removed stay blocked from signing up again.
 INSERT OR IGNORE INTO blocked_emails (id, customer_id, email, user_id, reason, blocked_by, created_at)

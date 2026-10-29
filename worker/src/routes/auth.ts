@@ -7,7 +7,8 @@ import { nowIso } from '../lib/time.ts';
 import { requiredEmail, requiredString } from '../lib/validate.ts';
 import { isStaffRole, requireSession } from '../middleware/auth.ts';
 import type { Ctx, Router } from '../router.ts';
-import { ensureStaffIdentity, finalizeAccount } from '../services/community.ts';
+import { finalizeAccount } from '../services/community.ts';
+
 import { ownCommunityState } from './communityAccount.ts';
 
 interface UserRow {
@@ -101,10 +102,6 @@ export function register(router: Router): void {
       [auth.userId],
     );
     if (pending) await finalizeAccount(ctx, auth.userId);
-    // Staff always have an ECenter staff community identity (older accounts get one on first load).
-    if (isStaffRole(String(user.role))) {
-      await ensureStaffIdentity(ctx.db, { id: auth.userId, customerId: auth.customerId, name: String(user.name) });
-    }
 
     return jsonResponse({
       user: {

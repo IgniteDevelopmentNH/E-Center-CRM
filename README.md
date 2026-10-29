@@ -275,8 +275,7 @@ npx wrangler d1 execute ecenter-crm --remote \
 `2026-10-28-community-v3.sql` adds event options (21+, public attendee lists, hiding from guests),
 group-only posts, blocked emails, groups, businesses and competitions. It is additive too: new
 columns with safe defaults (every existing post stays visible to everyone, including guests) and new
-tables. It also inserts rows only: an "ECenter staff" community identity for every existing staff
-user, and a blocked-email entry for every member who was already removed. Apply it **before**
+tables. It also inserts rows only: a blocked-email entry for every member who was already removed. Apply it **before**
 deploying the matching build:
 
 ```bash
@@ -385,10 +384,10 @@ unchanged. New staff APIs live under `/api/admin/*` and community APIs under `/a
 - Community routes use two guards. `requireCommunityViewer` (an active member, or any staff user)
   covers reading. `requireActiveCommunityMember` covers acting as a community identity, such as
   messaging.
-- Every staff user has an **ECenter staff** community identity, created with the account (and by
-  the v3 migration for existing staff), so staff are listed under ECenter staff in the Network. It is
-  never linked to a contact and leaves CRM access exactly as it was. **No administrative route can
-  read private conversations.**
+- Staff join the community through an explicit **staff identity** (Profile, then "Create my
+  community profile"), which lists them under ECenter staff in the Network. It is never linked to a
+  contact and leaves CRM access exactly as it was. **No administrative route can read private
+  conversations.**
 - **Guests** (no account) use the read-only `/api/public/*` routes: the main feed, upcoming events
   and competitions. They see only posts for everyone that the author has not hidden from guests, and
   only CRM events marked visible to guests. Comments, attendee lists, member profiles and photos are

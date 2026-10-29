@@ -16,7 +16,7 @@ import type { Db } from '../src/db/driver.ts';
 import { newId } from '../src/lib/ids.ts';
 import { hashPassword } from '../src/lib/password.ts';
 import { addDaysToDate, nowIso, todayDate } from '../src/lib/time.ts';
-import { CREATED_ACCOUNT_TAG, ensureDefaultTags, ensureStaffIdentity } from '../src/services/community.ts';
+import { CREATED_ACCOUNT_TAG, ensureDefaultTags } from '../src/services/community.ts';
 // @ts-expect-error -- plain JS dev shim, no type declarations.
 import { createFakeD1 } from '../dev/fakeD1.mjs';
 
@@ -127,8 +127,6 @@ export async function seedDemoData(
        VALUES (?, ?, 'weekly', 1, 'America/New_York', ?)`,
       [member.id, customerId, timestamp],
     );
-    // Staff appear under ECenter staff in the community Network.
-    await ensureStaffIdentity(db, { id: member.id, customerId, name: member.name });
   }
 
   const lisa = team[0]!.id;

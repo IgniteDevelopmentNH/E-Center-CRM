@@ -2,7 +2,6 @@ import { badRequest, jsonResponse } from '../lib/http.ts';
 import { newId } from '../lib/ids.ts';
 import { hashPassword } from '../lib/password.ts';
 import { nowIso } from '../lib/time.ts';
-import { ensureStaffIdentity } from '../services/community.ts';
 import type { Ctx, Router } from '../router.ts';
 
 /**
@@ -66,7 +65,6 @@ export function register(router: Router): void {
           params: [id, customerId, timestamp],
         },
       ]);
-      await ensureStaffIdentity(db, { id, customerId, name });
       return 'created';
     }
 
