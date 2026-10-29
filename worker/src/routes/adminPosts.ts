@@ -9,6 +9,7 @@ import { oneOf, optionalId, optionalString, positiveInt } from '../lib/validate.
 import { requireEditor, requireStaff } from '../middleware/auth.ts';
 import type { AuthContext, Ctx, Router } from '../router.ts';
 import { storeCommunityUpload } from '../services/communityFiles.ts';
+import { replacePostGroupsWrites, resolvePostGroups } from '../services/groups.ts';
 import { enqueueAnnouncement, enqueueMentionNotifications } from '../services/notifications.ts';
 import { parsePostFields, postImageUrl, recordRevision } from '../services/posts.ts';
 import { deleteObject } from '../services/storage.ts';
@@ -31,7 +32,10 @@ const SELECT_POST = `
          (SELECT COUNT(*) FROM post_likes l WHERE l.post_id = p.id) AS like_count,
          (SELECT COUNT(*) FROM post_comments c WHERE c.post_id = p.id AND c.deleted_at IS NULL) AS comment_count,
          (SELECT COUNT(*) FROM event_rsvps r WHERE r.target_type = 'post' AND r.target_id = p.id) AS rsvp_count,
-         (SELECT COUNT(*) FROM post_revisions pr WHERE pr.post_id = p.id) AS revision_count
+         (SELECT COUNT(*) FROM post_revisions pr WHERE pr.post_id = p.id) AS revision_count,
+         (SELECT json_group_array(json_object('id', g.id, 'name', g.name))
+            FROM post_groups pg JOIN community_groups g ON g.id = pg.group_id
+           WHERE pg.post_id = p.id) AS groups_json
     FROM posts p
     LEFT JOIN users u ON u.id = p.author_id
     LEFT JOIN community_profiles ap ON ap.user_id = p.author_id
@@ -58,8 +62,13 @@ async function adminPostOut(ctx: Ctx, row: Record<string, unknown>) {
           endsAt: row.event_ends_at ? String(row.event_ends_at) : null,
           location: row.event_location ? String(row.event_location) : null,
           rsvpEnabled: Number(row.rsvp_enabled) === 1,
+          age21: Number(row.event_age21) === 1,
+          attendeesPublic: Number(row.rsvp_list_public) === 1,
         }
       : null,
+    audience: String(row.audience ?? 'everyone'),
+    guestVisible: Number(row.guest_visible ?? 1) === 1,
+    groups: parseGroupList(row.groups_json),
     status: String(row.status),
     deleted: !!row.deleted_at,
     publishedAt: row.published_at ? String(row.published_at) : null,
@@ -84,6 +93,17 @@ async function adminPostOut(ctx: Ctx, row: Record<string, unknown>) {
   };
 }
 
+function parseGroupList(value: unknown): { id: string; name: string }[] {
+  if (typeof value !== 'string') return [];
+  try {
+    return (JSON.parse(value) as { id: unknown; name: unknown }[])
+      .filter((g) => g && g.id)
+      .map((g) => ({ id: String(g.id), name: String(g.name) }));
+  } catch {
+    return [];
+  }
+}
+
 async function loadPost(ctx: Ctx, id: string, customerId: string, includeDeleted = false) {
   const row = await ctx.db.get<Record<string, unknown>>(
     `${SELECT_POST} WHERE p.id = ? AND p.customer_id = ? ${includeDeleted ? '' : 'AND p.deleted_at IS NULL'}`,
@@ -94,8 +114,10 @@ async function loadPost(ctx: Ctx, id: string, customerId: string, includeDeleted
 }
 
 /** Staff posts may link a community-visible CRM event, or carry their own event details. */
-async function parseAdminPost(ctx: Ctx, body: Record<string, unknown>, customerId: string) {
+async function parseAdminPost(ctx: Ctx, body: Record<string, unknown>, auth: AuthContext) {
+  const customerId = auth.customerId;
   const fields = await parsePostFields(ctx.db, customerId, body);
+  const groupIds = await resolvePostGroups(ctx.db, auth, fields.audience, body.groupIds);
   const eventId = optionalId(body.eventId, 'Event');
   if (eventId) {
     const event = await ctx.db.get<{ community_visible: number }>(
@@ -107,7 +129,7 @@ async function parseAdminPost(ctx: Ctx, body: Record<string, unknown>, customerI
       throw badRequest('Mark that event "Show in the community portal" before linking it to a post.', 'Event');
     }
   }
-  return { ...fields, eventId };
+  return { ...fields, eventId, groupIds };
 }
 
 async function afterPublish(ctx: Ctx, auth: AuthContext, postId: string) {
@@ -242,22 +264,27 @@ export function register(router: Router): void {
   router.post('/api/admin/posts', async (ctx: Ctx) => {
     const auth = requireEditor(ctx);
     const body = await readJson(ctx.req);
-    const fields = await parseAdminPost(ctx, body, auth.customerId);
+    const fields = await parseAdminPost(ctx, body, auth);
     const publish = body.publish === true;
     const id = newId();
     const timestamp = nowIso();
-    await ctx.db.run(
-      `INSERT INTO posts (id, customer_id, title, body, link_url, event_id, status, published_at, author_id, author_kind,
-                          event_starts_at, event_ends_at, event_location, rsvp_enabled,
-                          created_at, updated_at, created_by, last_edited_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'staff', ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        id, auth.customerId, fields.title, fields.body, fields.linkUrl, fields.eventId,
-        publish ? 'published' : 'draft', publish ? timestamp : null, auth.userId,
-        fields.eventStartsAt, fields.eventEndsAt, fields.eventLocation, fields.rsvpEnabled,
-        timestamp, timestamp, auth.userId, auth.userId,
-      ],
-    );
+    await ctx.db.batch([
+      {
+        sql: `INSERT INTO posts (id, customer_id, title, body, link_url, event_id, status, published_at, author_id, author_kind,
+                            event_starts_at, event_ends_at, event_location, rsvp_enabled,
+                            event_age21, rsvp_list_public, guest_visible, audience,
+                            created_at, updated_at, created_by, last_edited_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'staff', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        params: [
+          id, auth.customerId, fields.title, fields.body, fields.linkUrl, fields.eventId,
+          publish ? 'published' : 'draft', publish ? timestamp : null, auth.userId,
+          fields.eventStartsAt, fields.eventEndsAt, fields.eventLocation, fields.rsvpEnabled,
+          fields.eventAge21, fields.rsvpListPublic, fields.guestVisible, fields.audience,
+          timestamp, timestamp, auth.userId, auth.userId,
+        ],
+      },
+      ...replacePostGroupsWrites(id, auth.customerId, fields.groupIds),
+    ]);
     await recordMentions(ctx.db, { customerId: auth.customerId, sourceType: 'post', sourceId: id, userIds: fields.mentionIds });
     if (publish) await afterPublish(ctx, auth, id);
     await audit(ctx.db, {
@@ -276,17 +303,22 @@ export function register(router: Router): void {
   router.put('/api/admin/posts/:id', async (ctx: Ctx) => {
     const auth = requireEditor(ctx);
     const existing = await loadPost(ctx, ctx.params.id!, auth.customerId);
-    const fields = await parseAdminPost(ctx, await readJson(ctx.req), auth.customerId);
+    const fields = await parseAdminPost(ctx, await readJson(ctx.req), auth);
     await recordRevision(ctx.db, { postId: ctx.params.id!, action: 'edit', changedBy: auth.userId });
-    await ctx.db.run(
-      `UPDATE posts SET title = ?, body = ?, link_url = ?, event_id = ?, event_starts_at = ?, event_ends_at = ?,
-              event_location = ?, rsvp_enabled = ?, updated_at = ?, last_edited_by = ?
-        WHERE id = ? AND customer_id = ?`,
-      [
-        fields.title, fields.body, fields.linkUrl, fields.eventId, fields.eventStartsAt, fields.eventEndsAt,
-        fields.eventLocation, fields.rsvpEnabled, nowIso(), auth.userId, ctx.params.id!, auth.customerId,
-      ],
-    );
+    await ctx.db.batch([
+      {
+        sql: `UPDATE posts SET title = ?, body = ?, link_url = ?, event_id = ?, event_starts_at = ?, event_ends_at = ?,
+                event_location = ?, rsvp_enabled = ?, event_age21 = ?, rsvp_list_public = ?, guest_visible = ?,
+                audience = ?, updated_at = ?, last_edited_by = ?
+          WHERE id = ? AND customer_id = ?`,
+        params: [
+          fields.title, fields.body, fields.linkUrl, fields.eventId, fields.eventStartsAt, fields.eventEndsAt,
+          fields.eventLocation, fields.rsvpEnabled, fields.eventAge21, fields.rsvpListPublic, fields.guestVisible,
+          fields.audience, nowIso(), auth.userId, ctx.params.id!, auth.customerId,
+        ],
+      },
+      ...replacePostGroupsWrites(ctx.params.id!, auth.customerId, fields.groupIds),
+    ]);
     await recordMentions(ctx.db, { customerId: auth.customerId, sourceType: 'post', sourceId: ctx.params.id!, userIds: fields.mentionIds });
     if (String(existing.status) === 'published') await afterPublish(ctx, auth, ctx.params.id!);
     await audit(ctx.db, {

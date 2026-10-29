@@ -42,6 +42,10 @@ function parseEvent(body: Record<string, unknown>) {
     // Shown to the community instead of the staff description.
     communityDetails: optionalString(body.communityDetails, 'Community description', { max: 5000 }),
     communityRsvp: flag(body.communityRsvp),
+    // 21+ (RSVPs confirm "I'm over 21"), public attendee list, and shown to guests.
+    communityAge21: flag(body.communityAge21),
+    communityRsvpPublic: flag(body.communityRsvp) ? flag(body.communityRsvpPublic) : 0,
+    communityGuestVisible: body.communityGuestVisible === false ? 0 : 1,
   };
 }
 
@@ -179,8 +183,9 @@ export function register(router: Router): void {
       `INSERT INTO events
          (id, customer_id, name, starts_at, ends_at, event_type, location, description,
           followup_notes, community_visible, community_details, community_rsvp,
+          community_age21, community_rsvp_public, community_guest_visible,
           created_at, updated_at, created_by, last_edited_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
         customerId,
@@ -194,6 +199,9 @@ export function register(router: Router): void {
         fields.communityVisible,
         fields.communityDetails,
         fields.communityRsvp,
+        fields.communityAge21,
+        fields.communityRsvpPublic,
+        fields.communityGuestVisible,
         timestamp,
         timestamp,
         userId,
@@ -230,6 +238,7 @@ export function register(router: Router): void {
       `UPDATE events SET
          name = ?, starts_at = ?, ends_at = ?, event_type = ?, location = ?, description = ?,
          followup_notes = ?, community_visible = ?, community_details = ?, community_rsvp = ?,
+         community_age21 = ?, community_rsvp_public = ?, community_guest_visible = ?,
          updated_at = ?, last_edited_by = ?
        WHERE id = ? AND customer_id = ?`,
       [
@@ -243,6 +252,9 @@ export function register(router: Router): void {
         fields.communityVisible,
         fields.communityDetails,
         fields.communityRsvp,
+        fields.communityAge21,
+        fields.communityRsvpPublic,
+        fields.communityGuestVisible,
         nowIso(),
         userId,
         ctx.params.id!,

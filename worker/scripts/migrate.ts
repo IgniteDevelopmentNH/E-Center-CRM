@@ -45,6 +45,16 @@ const ADDED_COLUMNS: { table: string; column: string; definition: string }[] = [
   { table: 'events', column: 'community_details', definition: 'TEXT' },
   { table: 'events', column: 'community_rsvp', definition: 'INTEGER NOT NULL DEFAULT 0' },
   { table: 'events', column: 'community_notified_at', definition: 'TEXT' },
+  // 2026-10-28-community-v3
+  { table: 'posts', column: 'event_age21', definition: 'INTEGER NOT NULL DEFAULT 0' },
+  { table: 'posts', column: 'rsvp_list_public', definition: 'INTEGER NOT NULL DEFAULT 0' },
+  { table: 'posts', column: 'guest_visible', definition: 'INTEGER NOT NULL DEFAULT 1' },
+  { table: 'posts', column: 'audience', definition: "TEXT NOT NULL DEFAULT 'everyone'" },
+  { table: 'events', column: 'community_age21', definition: 'INTEGER NOT NULL DEFAULT 0' },
+  { table: 'events', column: 'community_rsvp_public', definition: 'INTEGER NOT NULL DEFAULT 0' },
+  { table: 'events', column: 'community_guest_visible', definition: 'INTEGER NOT NULL DEFAULT 1' },
+  { table: 'event_rsvps', column: 'over21_confirmed', definition: 'INTEGER NOT NULL DEFAULT 0' },
+  { table: 'community_accounts', column: 'group_permission', definition: 'TEXT' },
 ];
 
 function main(): void {

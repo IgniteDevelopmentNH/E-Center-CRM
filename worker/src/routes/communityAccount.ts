@@ -24,20 +24,14 @@ import {
   requireStaff,
 } from '../middleware/auth.ts';
 import type { Ctx, Router } from '../router.ts';
-import {
-  ACCOUNT_TYPES,
-  ensureDefaultTags,
-  finalizeAccount,
-  loadTags,
-  photoUrl,
-  replaceTagWrites,
-} from '../services/community.ts';
+import { ACCOUNT_TYPES, ensureDefaultTags, ensureStaffIdentity, finalizeAccount, loadTags, photoUrl, replaceTagWrites } from '../services/community.ts';
 import {
   PREFERENCE_COLUMNS,
   readUnsubscribeToken,
 } from '../services/notifications.ts';
 import type { PreferenceKind } from '../services/notifications.ts';
 import { effectivePostPermission } from '../services/posts.ts';
+import { assertEmailNotBlocked } from '../services/blockedEmails.ts';
 import { storeCommunityUpload } from '../services/communityFiles.ts';
 import { deleteObject } from '../services/storage.ts';
 
@@ -45,7 +39,7 @@ const MAX_TAGS_PER_KIND = 10;
 
 /* ------------------------------------------------------------- helpers -- */
 
-async function defaultCustomerId(ctx: Ctx): Promise<string> {
+export async function defaultCustomerId(ctx: Ctx): Promise<string> {
   const customer = await ctx.db.get<{ id: string }>(
     `SELECT id FROM customers WHERE slug = ? AND deleted_at IS NULL`,
     [ctx.config.defaultCustomer.slug],
@@ -59,7 +53,7 @@ export async function ownCommunityState(ctx: Ctx, userId: string) {
   const row = await ctx.db.get<Record<string, unknown>>(
     `SELECT ca.account_type, ca.status, ca.onboarding_completed_at, ca.link_state,
             ca.resume_name, ca.resume_size, ca.resume_uploaded_at, ca.resume_public,
-            ca.post_permission, ca.notify_messages, ca.notify_mentions, ca.notify_announcements,
+            ca.post_permission, ca.group_permission, ca.notify_messages, ca.notify_mentions, ca.notify_announcements,
             u.email, u.email_verified_at, u.role,
             p.first_name, p.last_name, p.bio, p.linkedin_url, p.photo_key, p.major, p.graduation_year,
             p.role_title, p.company, p.scheduling_url,
@@ -106,6 +100,9 @@ export async function ownCommunityState(ctx: Ctx, userId: string) {
       : null,
     // What this person may do with posts (see services/posts.ts).
     postPermission: effectivePostPermission(String(row.account_type), row.post_permission as string | null, String(row.role)),
+    canCreateGroups:
+      String(row.group_permission ?? '') === 'create' ||
+      (String(row.account_type) === 'staff' && (row.role === 'owner' || row.role === 'editor')),
     notifications: {
       messages: Number(row.notify_messages) === 1,
       mentions: Number(row.notify_mentions) === 1,
@@ -184,6 +181,7 @@ export function register(router: Router): void {
 
     await enforceRateLimit(ctx.db, `signup:ip:${clientIp(ctx.req) || 'unknown'}`, { limit: 20, windowSeconds: 3600 });
     const customerId = await defaultCustomerId(ctx);
+    await assertEmailNotBlocked(ctx.db, customerId, email);
 
     const resume = async (): Promise<string | null> => {
       const existing = await ctx.db.get<{ id: string; role: string; password_hash: string; status: string | null }>(
@@ -693,6 +691,7 @@ export function register(router: Router): void {
     if (normaliseEmail(user.email) === email) throw badRequest('That is already your email address.', 'New email');
     const clash = await ctx.db.get(`SELECT id FROM users WHERE LOWER(email) = ?`, [email]);
     if (clash) throw conflict('That email address is already used by another account.', 'New email');
+    await assertEmailNotBlocked(ctx.db, auth.customerId, email, 'New email');
 
     await enforceRateLimit(ctx.db, `email-change:${auth.userId}`, { limit: 5, windowSeconds: 3600 });
     const token = await issueToken(ctx.db, {
@@ -736,22 +735,7 @@ export function register(router: Router): void {
       if (existing.status === 'deactivated') throw forbidden('Your community identity has been deactivated.');
       return jsonResponse({ community: await ownCommunityState(ctx, auth.userId) });
     }
-    const [first, ...rest] = auth.name.trim().split(/\s+/);
-    const timestamp = nowIso();
-    await ctx.db.batch([
-      {
-        sql: `INSERT OR IGNORE INTO community_accounts
-                (user_id, customer_id, account_type, status, onboarding_completed_at, activated_at,
-                 link_state, created_at, updated_at)
-              VALUES (?, ?, 'staff', 'active', ?, ?, 'not_applicable', ?, ?)`,
-        params: [auth.userId, auth.customerId, timestamp, timestamp, timestamp, timestamp],
-      },
-      {
-        sql: `INSERT OR IGNORE INTO community_profiles (user_id, customer_id, first_name, last_name, updated_at)
-              VALUES (?, ?, ?, ?, ?)`,
-        params: [auth.userId, auth.customerId, first || auth.name, rest.join(' ') || '', timestamp],
-      },
-    ]);
+    await ensureStaffIdentity(ctx.db, { id: auth.userId, customerId: auth.customerId, name: auth.name });
     await audit(ctx.db, {
       customerId: auth.customerId,
       userId: auth.userId,

@@ -526,7 +526,7 @@ describe('admin-authored feed', () => {
     const ids = events.body.events.map((e: any) => e.id);
     assert.ok(ids.includes(shown.body.event.id));
     assert.ok(!ids.includes(hidden.body.event.id));
-    assert.deepEqual(Object.keys(events.body.events[0]).sort(), ['endsAt', 'id', 'location', 'name', 'source', 'startsAt']);
+    assert.deepEqual(Object.keys(events.body.events[0]).sort(), ['competitionId', 'endsAt', 'id', 'location', 'name', 'source', 'startsAt']);
     // A post cannot be linked to a hidden event.
     const linked = await api('POST', '/api/admin/posts', { title: 'x', body: 'y', eventId: hidden.body.event.id });
     assert.equal(linked.status, 400);

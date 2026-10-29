@@ -8,6 +8,7 @@ import { oneOf, optionalId, optionalString, positiveInt } from '../lib/validate.
 import { requireEditor, requireStaff } from '../middleware/auth.ts';
 import type { Ctx, Router } from '../router.ts';
 import { finalizeAccount, loadTags, staffLinkAccount } from '../services/community.ts';
+import { blockEmail, unblockUser } from '../services/blockedEmails.ts';
 import { POST_PERMISSIONS, effectivePostPermission } from '../services/posts.ts';
 
 /**
@@ -59,6 +60,7 @@ function accountOut(row: Record<string, unknown>) {
     // Stored override (null = account-type default) and what actually applies.
     postPermissionOverride: row.post_permission ? String(row.post_permission) : null,
     postPermission: effectivePostPermission(String(row.account_type), row.post_permission as string | null, String(row.user_role)),
+    canCreateGroups: String(row.group_permission ?? '') === 'create',
     resumeName: row.resume_name ? String(row.resume_name) : null,
     createdAt: String(row.created_at),
     activatedAt: row.activated_at ? String(row.activated_at) : null,
@@ -202,7 +204,11 @@ export function register(router: Router): void {
     );
     // A community-only login is signed out everywhere now. A staff member's
     // community identity is deactivated without touching their CRM sessions.
-    if (row.user_role === 'member') await revokeAllSessionsForUser(ctx.db, ctx.params.userId!);
+    if (row.user_role === 'member') {
+      await revokeAllSessionsForUser(ctx.db, ctx.params.userId!);
+      // Removed members cannot sign up again with the same email until staff unblock it.
+      await blockEmail(ctx.db, { customerId, email: String(row.email), userId: ctx.params.userId!, reason, blockedBy: userId });
+    }
     await audit(ctx.db, {
       customerId,
       userId,
@@ -236,8 +242,78 @@ export function register(router: Router): void {
       metadata: { name: `${String(row.first_name)} ${String(row.last_name)}` },
       req: ctx.req,
     });
+    await unblockUser(ctx.db, customerId, ctx.params.userId!);
     await finalizeAccount(ctx, ctx.params.userId!);
     return jsonResponse(await detail(ctx, ctx.params.userId!, customerId));
+  });
+
+  /** Admin > Settings > Blocked users. */
+  router.get('/api/admin/blocked-emails', async (ctx: Ctx) => {
+    const { customerId } = requireStaff(ctx);
+    const rows = await ctx.db.all<Record<string, unknown>>(
+      `SELECT b.id, b.email, b.user_id, b.reason, b.created_at, blocker.name AS blocked_by_name,
+              p.first_name, p.last_name, ca.account_type
+         FROM blocked_emails b
+         LEFT JOIN users blocker ON blocker.id = b.blocked_by
+         LEFT JOIN community_profiles p ON p.user_id = b.user_id
+         LEFT JOIN community_accounts ca ON ca.user_id = b.user_id
+        WHERE b.customer_id = ?
+        ORDER BY b.created_at DESC LIMIT 500`,
+      [customerId],
+    );
+    return jsonResponse({
+      blocked: rows.map((row) => ({
+        id: String(row.id),
+        email: String(row.email),
+        userId: row.user_id ? String(row.user_id) : null,
+        name: row.first_name ? `${String(row.first_name)} ${String(row.last_name ?? '')}`.trim() : null,
+        accountType: row.account_type ? String(row.account_type) : null,
+        reason: row.reason ? String(row.reason) : null,
+        blockedByName: row.blocked_by_name ? String(row.blocked_by_name) : null,
+        createdAt: String(row.created_at),
+      })),
+    });
+  });
+
+  /** Unblocking lets the email sign up again and restores the removed account, if there is one. */
+  router.delete('/api/admin/blocked-emails/:id', async (ctx: Ctx) => {
+    const { customerId, userId } = requireEditor(ctx);
+    const row = await ctx.db.get<{ id: string; email: string; user_id: string | null }>(
+      `SELECT id, email, user_id FROM blocked_emails WHERE id = ? AND customer_id = ?`,
+      [ctx.params.id!, customerId],
+    );
+    if (!row) throw notFound('That email is not blocked.');
+    await ctx.db.run(`DELETE FROM blocked_emails WHERE id = ?`, [row.id]);
+    let reactivated = false;
+    if (row.user_id) {
+      const account = await ctx.db.get<Record<string, unknown>>(
+        `SELECT ca.status, ca.onboarding_completed_at, ca.account_type, u.email_verified_at
+           FROM community_accounts ca JOIN users u ON u.id = ca.user_id
+          WHERE ca.user_id = ? AND ca.customer_id = ?`,
+        [row.user_id, customerId],
+      );
+      if (account?.status === 'deactivated') {
+        const ready = !!account.onboarding_completed_at && !!account.email_verified_at;
+        await ctx.db.run(
+          `UPDATE community_accounts SET status = ?, deactivated_at = NULL, deactivated_by = NULL,
+                  deactivation_reason = NULL, updated_at = ?
+            WHERE user_id = ?`,
+          [ready ? 'active' : 'pending', nowIso(), row.user_id],
+        );
+        await finalizeAccount(ctx, row.user_id);
+        reactivated = true;
+      }
+    }
+    await audit(ctx.db, {
+      customerId,
+      userId,
+      action: 'community.unblocked',
+      entityType: 'user',
+      entityId: row.user_id,
+      metadata: { email: row.email, reactivated },
+      req: ctx.req,
+    });
+    return jsonResponse({ ok: true, reactivated });
   });
 
   /** Resolve a conflict: link to the chosen existing contact, or (contactId null) create a new one. */
@@ -279,13 +355,30 @@ export function register(router: Router): void {
     const { customerId, userId } = requireEditor(ctx);
     const row = await loadAccount(ctx, ctx.params.userId!, customerId);
     const body = await readJson(ctx.req);
-    const value = oneOf(body.postPermission, 'Posting', [...POST_PERMISSIONS, 'default'] as const);
-    await ctx.db.run(`UPDATE community_accounts SET post_permission = ?, updated_at = ? WHERE user_id = ? AND customer_id = ?`, [
-      value === 'default' ? null : value,
-      nowIso(),
-      ctx.params.userId!,
-      customerId,
-    ]);
+    // Either setting may be sent alone; anything not sent is left as it is.
+    const value =
+      body.postPermission === undefined
+        ? null
+        : oneOf(body.postPermission, 'Posting', [...POST_PERMISSIONS, 'default'] as const);
+    const groups =
+      body.canCreateGroups === undefined ? null : body.canCreateGroups === true ? 'create' : 'none';
+    if (value === null && groups === null) throw badRequest('Nothing to change.');
+    if (value !== null) {
+      await ctx.db.run(`UPDATE community_accounts SET post_permission = ?, updated_at = ? WHERE user_id = ? AND customer_id = ?`, [
+        value === 'default' ? null : value,
+        nowIso(),
+        ctx.params.userId!,
+        customerId,
+      ]);
+    }
+    if (groups !== null) {
+      await ctx.db.run(`UPDATE community_accounts SET group_permission = ?, updated_at = ? WHERE user_id = ? AND customer_id = ?`, [
+        groups,
+        nowIso(),
+        ctx.params.userId!,
+        customerId,
+      ]);
+    }
     await audit(ctx.db, {
       customerId,
       userId,
@@ -295,7 +388,8 @@ export function register(router: Router): void {
       metadata: {
         name: `${String(row.first_name)} ${String(row.last_name)}`,
         from: row.post_permission ?? 'default',
-        to: value,
+        to: value ?? undefined,
+        canCreateGroups: groups === null ? undefined : groups === 'create',
       },
       req: ctx.req,
     });

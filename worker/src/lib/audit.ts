@@ -48,7 +48,16 @@ export type AuditAction =
   | 'post.restore'
   | 'post.notify'
   | 'event.notify'
-  | 'community.permissions_changed';
+  | 'community.permissions_changed'
+  | 'community.unblocked'
+  | 'group.create'
+  | 'group.update'
+  | 'group.archive'
+  | 'group.moderators'
+  | 'business.delete'
+  | 'competition.create'
+  | 'competition.update'
+  | 'competition.delete';
 
 interface AuditInput {
   customerId: string;

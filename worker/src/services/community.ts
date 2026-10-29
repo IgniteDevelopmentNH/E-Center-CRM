@@ -90,6 +90,36 @@ export const MORE_INTEREST_TAGS = [
   'Writing & content',
 ] as const;
 
+/**
+ * Every staff user has an "ECenter staff" community identity, so they are
+ * listed under ECenter staff in the Network and can message, comment and RSVP.
+ * Idempotent; returns true when it created one.
+ */
+export async function ensureStaffIdentity(
+  db: Db,
+  user: { id: string; customerId: string; name: string },
+): Promise<boolean> {
+  const existing = await db.get(`SELECT 1 AS present FROM community_accounts WHERE user_id = ?`, [user.id]);
+  if (existing) return false;
+  const [first, ...rest] = user.name.trim().split(/\s+/);
+  const timestamp = new Date().toISOString();
+  await db.batch([
+    {
+      sql: `INSERT OR IGNORE INTO community_accounts
+              (user_id, customer_id, account_type, status, onboarding_completed_at, activated_at,
+               link_state, created_at, updated_at)
+            VALUES (?, ?, 'staff', 'active', ?, ?, 'not_applicable', ?, ?)`,
+      params: [user.id, user.customerId, timestamp, timestamp, timestamp, timestamp],
+    },
+    {
+      sql: `INSERT OR IGNORE INTO community_profiles (user_id, customer_id, first_name, last_name, updated_at)
+            VALUES (?, ?, ?, ?, ?)`,
+      params: [user.id, user.customerId, first || user.name, rest.join(' ') || '', timestamp],
+    },
+  ]);
+  return true;
+}
+
 export function slugify(label: string): string {
   return label
     .toLowerCase()

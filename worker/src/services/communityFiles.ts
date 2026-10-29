@@ -11,7 +11,7 @@ import { putObject, safeFileName } from './storage.ts';
  * is only ever served by the Worker behind an authorisation check.
  */
 
-export type UploadPurpose = 'photo' | 'resume' | 'post-image';
+export type UploadPurpose = 'photo' | 'resume' | 'post-image' | 'business-image' | 'competition-image';
 
 const IMAGE_TYPES: Record<string, string[]> = {
   'image/jpeg': ['.jpg', '.jpeg'],
@@ -28,12 +28,16 @@ const RESUME_TYPES: Record<string, string[]> = {
 const ALLOWED: Record<UploadPurpose, Record<string, string[]>> = {
   photo: IMAGE_TYPES,
   'post-image': IMAGE_TYPES,
+  'business-image': IMAGE_TYPES,
+  'competition-image': IMAGE_TYPES,
   resume: RESUME_TYPES,
 };
 
 const FRIENDLY: Record<UploadPurpose, string> = {
   photo: 'a JPEG, PNG or WebP image',
   'post-image': 'a JPEG, PNG or WebP image',
+  'business-image': 'a JPEG, PNG or WebP image',
+  'competition-image': 'a JPEG, PNG or WebP image',
   resume: 'a PDF or Word document',
 };
 
@@ -100,7 +104,13 @@ export async function storeCommunityUpload(
   }
 
   const fileName = safeFileName(file.name);
-  const folder = input.purpose === 'resume' ? 'resumes' : input.purpose === 'photo' ? 'photos' : 'posts';
+  const folder = {
+    resume: 'resumes',
+    photo: 'photos',
+    'post-image': 'posts',
+    'business-image': 'businesses',
+    'competition-image': 'competitions',
+  }[input.purpose];
   const key = `customers/${input.customerId}/community/${folder}/${input.ownerId}/${Date.now()}${extension}`;
   await putObject(ctx.env.DOCS, key, body, file.type, ctx.config.encryptionKey);
   return { key, fileName, type: file.type, size: file.size };

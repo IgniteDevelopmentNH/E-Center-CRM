@@ -192,6 +192,9 @@ CREATE TABLE IF NOT EXISTS events (
   community_details TEXT,                        -- public description for the portal
   community_rsvp INTEGER NOT NULL DEFAULT 0,     -- "I'll be there!" enabled
   community_notified_at TEXT,
+  community_age21 INTEGER NOT NULL DEFAULT 0,
+  community_rsvp_public INTEGER NOT NULL DEFAULT 0,
+  community_guest_visible INTEGER NOT NULL DEFAULT 1,
   created_at     TEXT NOT NULL,
   updated_at     TEXT NOT NULL,
   deleted_at     TEXT,
@@ -323,6 +326,7 @@ CREATE TABLE IF NOT EXISTS community_accounts (
   notify_messages          INTEGER NOT NULL DEFAULT 1,
   notify_mentions          INTEGER NOT NULL DEFAULT 1,
   notify_announcements     INTEGER NOT NULL DEFAULT 1,
+  group_permission         TEXT,                             -- NULL/none | create
   created_at               TEXT NOT NULL,
   updated_at               TEXT NOT NULL
 );
@@ -410,6 +414,10 @@ CREATE TABLE IF NOT EXISTS posts (
   event_ends_at  TEXT,
   event_location TEXT,
   rsvp_enabled   INTEGER NOT NULL DEFAULT 0,
+  event_age21    INTEGER NOT NULL DEFAULT 0,      -- RSVPs confirm "I'm over 21"
+  rsvp_list_public INTEGER NOT NULL DEFAULT 0,    -- members can see who is going
+  guest_visible  INTEGER NOT NULL DEFAULT 1,      -- shown to guests without an account
+  audience       TEXT NOT NULL DEFAULT 'everyone', -- everyone | groups
   notified_at    TEXT,
   deleted_by     TEXT REFERENCES users(id),
   created_at     TEXT NOT NULL,
@@ -546,6 +554,7 @@ CREATE TABLE IF NOT EXISTS event_rsvps (
   target_id   TEXT NOT NULL,
   user_id     TEXT NOT NULL REFERENCES users(id),
   customer_id TEXT NOT NULL REFERENCES customers(id),
+  over21_confirmed INTEGER NOT NULL DEFAULT 0,
   created_at  TEXT NOT NULL,
   PRIMARY KEY (target_type, target_id, user_id)
 );
@@ -572,3 +581,125 @@ CREATE TABLE IF NOT EXISTS email_outbox (
 );
 CREATE INDEX IF NOT EXISTS idx_email_outbox_due ON email_outbox(status, send_after);
 CREATE INDEX IF NOT EXISTS idx_email_outbox_ref ON email_outbox(kind, ref_id, to_user_id);
+
+-- ===========================================================================
+-- Community portal v3: blocked emails, groups, businesses, competitions.
+-- ===========================================================================
+
+-- Emails that may not sign up again. Added when staff remove (deactivate) a
+-- member; removed when staff unblock them from Admin > Settings.
+CREATE TABLE IF NOT EXISTS blocked_emails (
+  id          TEXT PRIMARY KEY,
+  customer_id TEXT NOT NULL REFERENCES customers(id),
+  email       TEXT NOT NULL,                  -- trimmed + lowercased
+  user_id     TEXT REFERENCES users(id),      -- the removed account, if any
+  reason      TEXT,
+  blocked_by  TEXT REFERENCES users(id),
+  created_at  TEXT NOT NULL,
+  UNIQUE (customer_id, email)
+);
+
+-- Interest groups. Members join public groups directly; private groups need a
+-- moderator to approve a request. Group-only posts appear only in their groups.
+CREATE TABLE IF NOT EXISTS community_groups (
+  id          TEXT PRIMARY KEY,
+  customer_id TEXT NOT NULL REFERENCES customers(id),
+  slug        TEXT NOT NULL,
+  name        TEXT NOT NULL,
+  description TEXT,
+  privacy     TEXT NOT NULL DEFAULT 'public', -- public | private
+  is_default  INTEGER NOT NULL DEFAULT 0,
+  created_by  TEXT REFERENCES users(id),
+  created_at  TEXT NOT NULL,
+  updated_at  TEXT NOT NULL,
+  archived_at TEXT,
+  UNIQUE (customer_id, slug)
+);
+
+CREATE TABLE IF NOT EXISTS group_members (
+  group_id     TEXT NOT NULL REFERENCES community_groups(id),
+  user_id      TEXT NOT NULL REFERENCES users(id),
+  customer_id  TEXT NOT NULL REFERENCES customers(id),
+  role         TEXT NOT NULL DEFAULT 'member',  -- member | moderator
+  status       TEXT NOT NULL DEFAULT 'active',  -- active | pending (join request)
+  requested_at TEXT NOT NULL,
+  joined_at    TEXT,
+  PRIMARY KEY (group_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_group_members_user ON group_members(user_id, status);
+
+-- Which groups a group-only post (posts.audience = 'groups') is shared to.
+CREATE TABLE IF NOT EXISTS post_groups (
+  post_id     TEXT NOT NULL REFERENCES posts(id),
+  group_id    TEXT NOT NULL REFERENCES community_groups(id),
+  customer_id TEXT NOT NULL REFERENCES customers(id),
+  PRIMARY KEY (post_id, group_id)
+);
+CREATE INDEX IF NOT EXISTS idx_post_groups_group ON post_groups(group_id);
+
+-- Member-owned business profiles.
+CREATE TABLE IF NOT EXISTS businesses (
+  id            TEXT PRIMARY KEY,
+  customer_id   TEXT NOT NULL REFERENCES customers(id),
+  owner_id      TEXT NOT NULL REFERENCES users(id),
+  name          TEXT NOT NULL,
+  tagline       TEXT,
+  description   TEXT,
+  industry      TEXT,
+  website       TEXT,
+  location      TEXT,
+  hiring        INTEGER NOT NULL DEFAULT 0,
+  hiring_details TEXT,
+  networking    INTEGER NOT NULL DEFAULT 0,
+  looking_for   TEXT,
+  logo_key      TEXT,
+  logo_type     TEXT,
+  created_at    TEXT NOT NULL,
+  updated_at    TEXT NOT NULL,
+  deleted_at    TEXT,
+  deleted_by    TEXT REFERENCES users(id)
+);
+CREATE INDEX IF NOT EXISTS idx_businesses_customer ON businesses(customer_id, deleted_at);
+CREATE INDEX IF NOT EXISTS idx_businesses_owner ON businesses(owner_id);
+
+CREATE TABLE IF NOT EXISTS business_photos (
+  id          TEXT PRIMARY KEY,
+  business_id TEXT NOT NULL REFERENCES businesses(id),
+  customer_id TEXT NOT NULL REFERENCES customers(id),
+  image_key   TEXT NOT NULL,
+  image_type  TEXT NOT NULL,
+  caption     TEXT,
+  created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_business_photos_business ON business_photos(business_id, created_at);
+
+-- ECenter competitions. Each deadline also appears in Upcoming events.
+CREATE TABLE IF NOT EXISTS competitions (
+  id           TEXT PRIMARY KEY,
+  customer_id  TEXT NOT NULL REFERENCES customers(id),
+  title        TEXT NOT NULL,
+  summary      TEXT,
+  description  TEXT,
+  prize        TEXT,
+  eligibility  TEXT,
+  link_url     TEXT,
+  image_key    TEXT,
+  image_type   TEXT,
+  status       TEXT NOT NULL DEFAULT 'draft',  -- draft | published | archived
+  published_at TEXT,
+  created_by   TEXT REFERENCES users(id),
+  created_at   TEXT NOT NULL,
+  updated_at   TEXT NOT NULL,
+  deleted_at   TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_competitions_customer ON competitions(customer_id, status, deleted_at);
+
+CREATE TABLE IF NOT EXISTS competition_deadlines (
+  id             TEXT PRIMARY KEY,
+  competition_id TEXT NOT NULL REFERENCES competitions(id),
+  customer_id    TEXT NOT NULL REFERENCES customers(id),
+  label          TEXT NOT NULL,
+  due_at         TEXT NOT NULL,
+  created_at     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_competition_deadlines_due ON competition_deadlines(customer_id, due_at);

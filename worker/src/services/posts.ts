@@ -56,6 +56,14 @@ export interface PostFields {
   eventEndsAt: string | null;
   eventLocation: string | null;
   rsvpEnabled: 0 | 1;
+  /** 21+ event: an RSVP must confirm "I'm over 21". */
+  eventAge21: 0 | 1;
+  /** Members can see who is going. */
+  rsvpListPublic: 0 | 1;
+  /** Guests (no account) can see it in the main feed. */
+  guestVisible: 0 | 1;
+  /** Main feed, or only the feeds of chosen groups. */
+  audience: 'everyone' | 'groups';
   mentionIds: string[];
 }
 
@@ -77,6 +85,11 @@ export async function parsePostFields(db: Db, customerId: string, body: Record<s
     eventEndsAt,
     eventLocation: isEvent ? optionalString(body.eventLocation, 'Event location', { max: 200 }) : null,
     rsvpEnabled: isEvent ? flag(body.rsvpEnabled) : 0,
+    eventAge21: isEvent ? flag(body.eventAge21) : 0,
+    rsvpListPublic: isEvent && flag(body.rsvpEnabled) ? flag(body.rsvpListPublic) : 0,
+    // Visible to guests unless the author hides it.
+    guestVisible: body.guestVisible === false ? 0 : 1,
+    audience: body.audience === 'groups' ? 'groups' : 'everyone',
     mentionIds: userIds,
   };
 }
@@ -114,7 +127,10 @@ export const POST_SELECT = `
          (SELECT COUNT(*) FROM post_comments c WHERE c.post_id = p.id AND c.deleted_at IS NULL) AS comment_count,
          (SELECT COUNT(*) FROM event_rsvps r WHERE r.target_type = 'post' AND r.target_id = p.id) AS rsvp_count,
          EXISTS (SELECT 1 FROM post_likes l WHERE l.post_id = p.id AND l.user_id = ?) AS liked_by_me,
-         EXISTS (SELECT 1 FROM event_rsvps r WHERE r.target_type = 'post' AND r.target_id = p.id AND r.user_id = ?) AS rsvp_by_me
+         EXISTS (SELECT 1 FROM event_rsvps r WHERE r.target_type = 'post' AND r.target_id = p.id AND r.user_id = ?) AS rsvp_by_me,
+         (SELECT json_group_array(json_object('id', g.id, 'slug', g.slug, 'name', g.name, 'privacy', g.privacy))
+            FROM post_groups pg JOIN community_groups g ON g.id = pg.group_id AND g.archived_at IS NULL
+           WHERE pg.post_id = p.id) AS groups_json
     FROM posts p
     LEFT JOIN users u ON u.id = p.author_id
     LEFT JOIN community_profiles ap ON ap.user_id = p.author_id
@@ -176,8 +192,13 @@ export async function communityPostOut(ctx: Ctx, row: Record<string, unknown>, v
           rsvpEnabled: Number(row.rsvp_enabled) === 1,
           rsvpCount: Number(row.rsvp_count ?? 0),
           going: Number(row.rsvp_by_me ?? 0) === 1,
+          age21: Number(row.event_age21) === 1,
+          attendeesPublic: Number(row.rsvp_list_public) === 1,
         }
       : null,
+    audience: String(row.audience ?? 'everyone') as 'everyone' | 'groups',
+    guestVisible: Number(row.guest_visible ?? 1) === 1,
+    groups: parseGroups(row.groups_json),
     // A CRM event the post points at (only if still community-visible).
     linkedEvent: row.ev_id
       ? {
@@ -194,6 +215,18 @@ export async function communityPostOut(ctx: Ctx, row: Record<string, unknown>, v
     canEdit: isAuthor || canModerate,
     canDelete: isAuthor || canModerate,
   };
+}
+
+function parseGroups(value: unknown): { id: string; slug: string; name: string; privacy: string }[] {
+  if (typeof value !== 'string') return [];
+  try {
+    const parsed = JSON.parse(value) as Record<string, unknown>[];
+    return parsed
+      .filter((g) => g && g.id)
+      .map((g) => ({ id: String(g.id), slug: String(g.slug), name: String(g.name), privacy: String(g.privacy) }));
+  } catch {
+    return [];
+  }
 }
 
 export function viewerParams(viewer: AuthContext | null): SqlParam[] {

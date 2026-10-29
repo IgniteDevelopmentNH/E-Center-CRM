@@ -40,6 +40,14 @@ function isoDaysAhead(days: number, hour = 17, minute = 0): string {
 }
 
 const CUSTOMER_SCOPED_TABLES = [
+  'competition_deadlines',
+  'competitions',
+  'business_photos',
+  'businesses',
+  'post_groups',
+  'group_members',
+  'community_groups',
+  'blocked_emails',
   'email_outbox',
   'event_rsvps',
   'post_mentions',

@@ -12,7 +12,11 @@ import { register as registerBootstrap } from './routes/bootstrap.ts';
 import { register as registerCalendar } from './routes/calendar.ts';
 import { register as registerCommunityAccount } from './routes/communityAccount.ts';
 import { register as registerCommunityContent } from './routes/communityContent.ts';
+import { register as registerBusinesses } from './routes/businesses.ts';
 import { register as registerCommunityPosts } from './routes/communityPosts.ts';
+import { register as registerCompetitions } from './routes/competitions.ts';
+import { register as registerGroups } from './routes/groups.ts';
+import { register as registerPublic } from './routes/public.ts';
 import { runScheduledNotifications } from './services/notifications.ts';
 import { register as registerContacts } from './routes/contacts.ts';
 import { register as registerDashboard } from './routes/dashboard.ts';
@@ -46,7 +50,12 @@ router
   .use(registerCommunityAccount)
   .use(registerCommunityContent)
   .use(registerCommunityPosts)
-  .use(registerMessages);
+  .use(registerGroups)
+  .use(registerBusinesses)
+  .use(registerCompetitions)
+  .use(registerMessages)
+  // Guest (no account) read-only access.
+  .use(registerPublic);
 
 /**
  * Headers added to every response the Worker produces. Static files served

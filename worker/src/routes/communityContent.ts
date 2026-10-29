@@ -80,7 +80,7 @@ async function listMembers(ctx: Ctx, customerId: string, viewerId: string) {
   return { members, page, limit, total: count, hasMore: page * limit < count };
 }
 
-function fileResponse(body: ArrayBuffer, type: string, disposition: string): Response {
+export function fileResponse(body: ArrayBuffer, type: string, disposition: string): Response {
   return new Response(body, {
     headers: {
       'Content-Type': type,

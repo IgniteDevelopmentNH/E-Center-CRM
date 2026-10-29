@@ -8,7 +8,7 @@
     "migrate": "node --env-file-if-exists=../.env scripts/migrate.ts",
     "seed": "node --env-file-if-exists=../.env scripts/seed.ts",
     "reset": "node --env-file-if-exists=../.env scripts/reset.ts",
-    "test": "node --env-file-if-exists=../.env --test test/api.test.ts test/community.test.ts test/community-v2.test.ts",
+    "test": "node --env-file-if-exists=../.env --test test/api.test.ts test/community.test.ts test/community-v2.test.ts test/community-v3.test.ts",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.node.json"
   },
   "devDependencies": {

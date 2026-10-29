@@ -137,8 +137,16 @@ export async function enqueueAnnouncement(
             'announcement:' || ? || ':' || ? || ':' || ca.user_id, 'queued', ?, ?
        FROM community_accounts ca JOIN users u ON u.id = ca.user_id
       WHERE ca.customer_id = ? AND ca.status = 'active' AND ca.notify_announcements = 1
-        AND u.deleted_at IS NULL AND ca.user_id <> ?`,
-    [input.refType, input.refId, input.actorId, input.refType, input.refId, timestamp, timestamp, input.customerId, input.actorId],
+        AND u.deleted_at IS NULL AND ca.user_id <> ?
+        AND (? <> 'post'
+             OR NOT EXISTS (SELECT 1 FROM posts px WHERE px.id = ? AND px.audience = 'groups')
+             OR EXISTS (SELECT 1 FROM post_groups pg
+                          JOIN group_members gm ON gm.group_id = pg.group_id AND gm.status = 'active'
+                         WHERE pg.post_id = ? AND gm.user_id = ca.user_id))`,
+    [
+      input.refType, input.refId, input.actorId, input.refType, input.refId, timestamp, timestamp, input.customerId, input.actorId,
+      input.refType, input.refId, input.refId,
+    ],
   );
   const row = await db.get<{ total: unknown }>(
     `SELECT COUNT(*) AS total FROM email_outbox WHERE kind = 'announcement' AND ref_type = ? AND ref_id = ?`,
