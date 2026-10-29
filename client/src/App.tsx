@@ -27,6 +27,11 @@ import { NetworkPage } from './pages/community/NetworkPage.tsx';
 import { ProfilePage } from './pages/community/ProfilePage.tsx';
 import { SignupPage } from './pages/community/SignupPage.tsx';
 import { VerifyEmailPage } from './pages/community/VerifyEmailPage.tsx';
+import { BusinessDetailPage, BusinessesPage } from './pages/community/BusinessesPage.tsx';
+import { CompetitionDetailPage, CompetitionsPage } from './pages/community/CompetitionsPage.tsx';
+import { GroupDetailPage, GroupsPage } from './pages/community/GroupsPage.tsx';
+import { CompetitionsAdminPage } from './pages/admin/CompetitionsAdminPage.tsx';
+import { GroupsAdminPage } from './pages/admin/GroupsAdminPage.tsx';
 import { useAuth } from './state/AuthContext.tsx';
 
 /** Old CRM paths (before the move under /admin) keep working: bookmarks, emails, muscle memory. */
@@ -92,6 +97,8 @@ function AdminArea() {
         <Route path="events" element={<EventsPage />} />
         <Route path="posts" element={<PostsAdminPage />} />
         <Route path="members" element={<MembersAdminPage />} />
+        <Route path="groups" element={<GroupsAdminPage />} />
+        <Route path="competitions" element={<CompetitionsAdminPage />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/admin" replace />} />
       </Routes>
@@ -109,8 +116,15 @@ function community(page: ReactNode) {
   );
 }
 
+/** Pages guests may read: signed-in people get the full community view, guests a read-only one. */
+function GuestReadable({ children }: { children: ReactNode }) {
+  const { user } = useAuth();
+  if (user) return community(children);
+  return <CommunityShell>{children}</CommunityShell>;
+}
+
 export function App() {
-  const { user, ready } = useAuth();
+  const { user, ready, isGuest } = useAuth();
 
   if (!ready) {
     return (
@@ -144,13 +158,22 @@ export function App() {
       ))}
 
       {/* Community portal */}
-      <Route path="/" element={user ? community(<FeedPage />) : <LandingPage />} />
+      <Route
+        path="/"
+        element={user ? community(<FeedPage />) : isGuest ? <CommunityShell><FeedPage /></CommunityShell> : <LandingPage />}
+      />
+      <Route path="/groups" element={community(<GroupsPage />)} />
+      <Route path="/groups/:id" element={community(<GroupDetailPage />)} />
+      <Route path="/businesses" element={community(<BusinessesPage />)} />
+      <Route path="/businesses/:id" element={community(<BusinessDetailPage />)} />
+      <Route path="/competitions" element={<GuestReadable><CompetitionsPage /></GuestReadable>} />
+      <Route path="/competitions/:id" element={<GuestReadable><CompetitionDetailPage /></GuestReadable>} />
       <Route path="/mentorship" element={community(<MentorshipPage />)} />
       <Route path="/network" element={community(<NetworkPage />)} />
       <Route path="/messages" element={community(<MessagesPage />)} />
       <Route path="/members/:id" element={community(<MemberProfilePage />)} />
-      <Route path="/posts/:id" element={community(<PostDetailPage />)} />
-      <Route path="/events/:id" element={community(<EventDetailPage />)} />
+      <Route path="/posts/:id" element={<GuestReadable><PostDetailPage /></GuestReadable>} />
+      <Route path="/events/:id" element={<GuestReadable><EventDetailPage /></GuestReadable>} />
       <Route path="/my-posts" element={community(<MyPostsPage />)} />
       <Route
         path="/profile"

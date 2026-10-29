@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { RichText } from '../../components/mentions.tsx';
-import { CommentsSection, DateBadge, LikeButton, MemberPostEditor, PostAuthor, RsvpButton, eventWhen } from '../../components/posts.tsx';
+import { CommentsSection, DateBadge, LikeButton, MemberPostEditor, PostAuthor, PostBadges, RsvpButton, eventWhen } from '../../components/posts.tsx';
 import { ErrorBlock, LoadingBlock } from '../../components/ui.tsx';
 import { ApiError, api } from '../../lib/api.ts';
-import { useApi } from '../../lib/hooks.ts';
+import { useApi, useCommunityBase } from '../../lib/hooks.ts';
 import type { FeedPost, PostComment } from '../../lib/types.ts';
 import { useAuth } from '../../state/AuthContext.tsx';
 import { useToast } from '../../state/ToastContext.tsx';
@@ -20,8 +20,9 @@ export function PostDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const toast = useToast();
-  const { community, isStaff } = useAuth();
-  const { data, loading, error, reload } = useApi<{ post: FeedPost; comments: PostComment[] }>(id ? `/community/posts/${id}` : null);
+  const { user, community, isStaff } = useAuth();
+  const base = useCommunityBase();
+  const { data, loading, error, reload } = useApi<{ post: FeedPost; comments: PostComment[] }>(id ? `${base}/posts/${id}` : null);
   const [post, setPost] = useState<FeedPost | null>(null);
   const [comments, setComments] = useState<PostComment[]>([]);
   const [editing, setEditing] = useState(false);
@@ -94,6 +95,7 @@ export function PostDetailPage() {
               </div>
             )}
           </div>
+          <PostBadges post={post} />
           <h1 id="post-title" className="mt-4 text-2xl font-bold text-navy-800">{post.title}</h1>
           <RichText text={post.body} className="mt-3 text-[15px] leading-relaxed text-slate-700" />
         </div>
@@ -116,6 +118,8 @@ export function PostDetailPage() {
                 id={post.id}
                 going={post.event.going}
                 count={post.event.rsvpCount}
+                age21={post.event.age21}
+                showAttendees={post.event.attendeesPublic || post.canEdit}
                 onChange={(state) => patch({ event: { ...post.event!, going: state.going, rsvpCount: state.rsvpCount } })}
               />
             )}
@@ -149,7 +153,19 @@ export function PostDetailPage() {
         )}
       </article>
 
-      {post.status === 'published' && (
+      {post.status === 'published' && !user && (
+        <section className="card p-4 sm:p-6" aria-label="Comments">
+          <h2 className="text-sm font-bold uppercase tracking-wide text-navy-800">
+            Comments {post.commentCount > 0 && <span className="text-slate-400">({post.commentCount})</span>}
+          </h2>
+          <p className="mt-3 text-sm text-slate-600">
+            <Link to={`/login?next=${encodeURIComponent(`/posts/${post.id}`)}`} className="font-semibold text-teal-700 hover:underline">Sign in</Link> or{' '}
+            <Link to="/signup" className="font-semibold text-teal-700 hover:underline">create an account</Link> to read and join the conversation.
+          </p>
+        </section>
+      )}
+
+      {post.status === 'published' && !!user && (
         <CommentsSection
           postId={post.id}
           comments={comments}

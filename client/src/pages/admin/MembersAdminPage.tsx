@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { accountTypeLabel } from '../../components/community.tsx';
 import { Modal, SlideOver } from '../../components/overlays.tsx';
-import { ACCOUNT_STATUS_TONES, Chip, EmptyState, ErrorBlock, Field, LoadingBlock, Pagination, Select, TextArea } from '../../components/ui.tsx';
+import { ACCOUNT_STATUS_TONES, Checkbox, Chip, EmptyState, ErrorBlock, Field, LoadingBlock, Pagination, Select, TextArea } from '../../components/ui.tsx';
 import type { Tone } from '../../components/ui.tsx';
 import { ApiError, api, buildQuery, openSignedUrl } from '../../lib/api.ts';
 import { formatDate, formatDateTime } from '../../lib/format.ts';
@@ -208,16 +208,16 @@ function AccountPanel({ userId, onClose, onChanged }: { userId: string; onClose:
   const [deactivating, setDeactivating] = useState(false);
   const [reason, setReason] = useState('');
 
-  async function setPermission(value: string) {
+  async function setPermission(change: { postPermission?: string; canCreateGroups?: boolean }) {
     setBusy(true);
     try {
       const response = await api.put<{ account: AdminCommunityAccount; candidates: LinkCandidate[] }>(
         `/admin/community/accounts/${userId}/permissions`,
-        { postPermission: value },
+        change,
       );
       setData(() => response);
       onChanged();
-      toast.success('Posting permission updated.');
+      toast.success('Permissions updated.');
     } catch (caught) {
       toast.error(caught instanceof ApiError ? caught.message : 'That did not work.');
     } finally {
@@ -307,8 +307,25 @@ function AccountPanel({ userId, onClose, onChanged }: { userId: string; onClose:
             account={account}
             canEdit={canEdit}
             busy={busy}
-            onSave={(value) => setPermission(value)}
+            onSave={(value) => setPermission({ postPermission: value })}
           />
+
+          {account.accountType !== 'staff' && (
+            <section className="space-y-1">
+              <h3 className="text-xs font-bold uppercase tracking-wide text-navy-800">Groups</h3>
+              {canEdit ? (
+                <Checkbox
+                  label="Can create groups (and moderate the ones they create)"
+                  checked={account.canCreateGroups}
+                  disabled={busy}
+                  onChange={(checked) => setPermission({ canCreateGroups: checked })}
+                />
+              ) : (
+                <p>{account.canCreateGroups ? 'Can create groups' : 'Cannot create groups'}</p>
+              )}
+              <p className="text-xs text-slate-500">Moderators of a specific group are managed from Admin &gt; Groups.</p>
+            </section>
+          )}
 
           {account.accountType !== 'staff' && (
             <section className="space-y-2">
@@ -351,8 +368,9 @@ function AccountPanel({ userId, onClose, onChanged }: { userId: string; onClose:
       <Modal open={deactivating} title="Remove from the community?" onClose={() => setDeactivating(false)} width="max-w-md">
         <p className="text-sm text-slate-600">
           This deactivates their community account: they are signed out, removed from the directory and mentor
-          recommendations, and can't send or receive new messages. Their CRM contact, notes and conversation history are
-          kept. You can reactivate them later.
+          recommendations, and can't send or receive new messages. Their email is blocked from signing up again. Their
+          CRM contact, notes and conversation history are kept. You can reactivate them later, or unblock them from
+          Settings &gt; Blocked users.
         </p>
         <Field label="Reason (staff only, optional)">
           <TextArea rows={2} value={reason} onChange={(e) => setReason(e.target.value)} maxLength={500} />

@@ -34,6 +34,35 @@ const ICONS: Record<string, ReactNode> = {
       <path d="M4 21c1-4 4.2-6 8-6s7 2 8 6" />
     </>
   ),
+  groups: (
+    <>
+      <circle cx="12" cy="7" r="3" />
+      <circle cx="5.5" cy="10" r="2.3" />
+      <circle cx="18.5" cy="10" r="2.3" />
+      <path d="M6.5 20c.6-3.4 2.8-5.5 5.5-5.5s4.9 2.1 5.5 5.5" />
+      <path d="M2 18c.4-2 1.6-3.3 3.3-3.6M22 18c-.4-2-1.6-3.3-3.3-3.6" />
+    </>
+  ),
+  businesses: (
+    <>
+      <rect x="3" y="7" width="18" height="13" rx="1.5" />
+      <path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M3 12.5h18" />
+    </>
+  ),
+  competitions: (
+    <>
+      <path d="M8 4h8v5a4 4 0 0 1-8 0z" />
+      <path d="M8 6H5a3 3 0 0 0 3 4M16 6h3a3 3 0 0 1-3 4M12 13v4M8.5 20h7" />
+    </>
+  ),
+  more: (
+    <>
+      <circle cx="5" cy="12" r="1.3" />
+      <circle cx="12" cy="12" r="1.3" />
+      <circle cx="19" cy="12" r="1.3" />
+    </>
+  ),
+  signin: <path d="M10 17l5-5-5-5M15 12H3M14 4h5a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-5" />,
 };
 
 function Icon({ name }: { name: string }) {
@@ -78,21 +107,41 @@ function useUnreadCount(enabled: boolean): number {
 export function CommunityShell({ children }: { children: ReactNode }) {
   const { user, community, isStaff, isActiveMember, signOut } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   const unread = useUnreadCount(isActiveMember);
   const location = useLocation();
   useEscapeKey(() => setMenuOpen(false), menuOpen);
-  useEffect(() => setMenuOpen(false), [location.pathname]);
+  useEscapeKey(() => setMoreOpen(false), moreOpen);
+  useEffect(() => {
+    setMenuOpen(false);
+    setMoreOpen(false);
+  }, [location.pathname]);
 
+  const guest = !user;
   const canPost = !!community && community.status === 'active' && community.postPermission !== 'none';
-  const nav = [
-    { to: '/', label: 'Feed', icon: 'feed' },
-    { to: '/network', label: 'Network', icon: 'network' },
-    { to: '/mentorship', label: 'Mentorship', icon: 'mentorship' },
-    { to: '/messages', label: 'Messages', icon: 'messages', badge: unread },
-    ...(canPost ? [{ to: '/my-posts', label: 'Posts', icon: 'posts' }] : []),
-  ];
-  // Phones get a bottom tab bar; Profile fills the fifth slot when there is no Posts tab.
-  const mobileNav = canPost ? nav : [...nav, { to: '/profile', label: 'Profile', icon: 'profile' }];
+  type NavItem = { to: string; label: string; icon: string; badge?: number };
+  const nav: NavItem[] = guest
+    ? [
+        { to: '/', label: 'Feed', icon: 'feed' },
+        { to: '/competitions', label: 'Competitions', icon: 'competitions' },
+      ]
+    : [
+        { to: '/', label: 'Feed', icon: 'feed' },
+        { to: '/network', label: 'Network', icon: 'network' },
+        { to: '/groups', label: 'Groups', icon: 'groups' },
+        { to: '/businesses', label: 'Businesses', icon: 'businesses' },
+        { to: '/competitions', label: 'Competitions', icon: 'competitions' },
+        { to: '/mentorship', label: 'Mentorship', icon: 'mentorship' },
+        { to: '/messages', label: 'Messages', icon: 'messages', badge: unread },
+        ...(canPost ? [{ to: '/my-posts', label: 'Posts', icon: 'posts' }] : []),
+      ];
+  // Phones and tablets get a bottom tab bar: four tabs plus "More" for the rest.
+  const primaryPaths = guest ? ['/', '/competitions'] : ['/', '/network', '/groups', '/messages'];
+  const mobilePrimary = nav.filter((item) => primaryPaths.includes(item.to));
+  const mobileMore: NavItem[] = guest
+    ? []
+    : [...nav.filter((item) => !primaryPaths.includes(item.to)), { to: '/profile', label: 'My profile', icon: 'profile' }];
+  const moreActive = mobileMore.some((item) => location.pathname.startsWith(item.to));
 
   const displayName = community
     ? `${community.profile.firstName} ${community.profile.lastName}`.trim()
@@ -114,8 +163,8 @@ export function CommunityShell({ children }: { children: ReactNode }) {
             <span className="hidden text-lg font-bold leading-tight sm:block">ECenter Community</span>
           </Link>
 
-          <nav className="ml-6 hidden flex-1 md:block" aria-label="Community">
-            <div className="flex gap-1">
+          <nav className="ml-4 hidden flex-1 lg:block" aria-label="Community">
+            <div className="flex gap-0.5">
               {nav.map((item) => (
                 <NavLink
                   key={item.to}
@@ -134,7 +183,18 @@ export function CommunityShell({ children }: { children: ReactNode }) {
             </div>
           </nav>
 
-          <div className="relative ml-auto shrink-0">
+          {guest && (
+            <div className="ml-auto flex shrink-0 items-center gap-2">
+              <Link to="/login" className="inline-flex min-h-[40px] items-center rounded-lg px-3 text-sm font-semibold hover:bg-white/10">
+                Sign in
+              </Link>
+              <Link to="/signup" className="inline-flex min-h-[40px] items-center rounded-lg bg-teal px-3 text-sm font-semibold text-white hover:bg-teal-700">
+                Join
+              </Link>
+            </div>
+          )}
+
+          <div className={`relative ml-auto shrink-0 ${guest ? 'hidden' : ''}`}>
             <button
               type="button"
               onClick={() => setMenuOpen((open) => !open)}
@@ -181,27 +241,62 @@ export function CommunityShell({ children }: { children: ReactNode }) {
         </div>
       </header>
 
+      {guest && (
+        <div className="bg-teal-50 px-4 py-2 text-center text-sm text-teal-900">
+          You're browsing as a guest.{' '}
+          <Link to="/signup" className="font-semibold underline">Create an account</Link> to comment, RSVP and connect.
+        </div>
+      )}
+
       <main
         id="main"
-        className={`mx-auto w-full max-w-6xl flex-1 px-3 sm:px-4 ${fullBleed ? 'pb-20 pt-3 md:py-6' : 'pb-28 pt-4 md:py-6'}`}
+        className={`mx-auto w-full max-w-6xl flex-1 px-3 sm:px-4 ${fullBleed ? 'pb-20 pt-3 lg:py-6' : 'pb-28 pt-4 lg:py-6'}`}
       >
         {children}
       </main>
 
-      <footer className="hidden border-t border-slate-200 bg-white px-4 py-5 md:block">
+      <footer className="hidden border-t border-slate-200 bg-white px-4 py-5 lg:block">
         <p className="mx-auto max-w-6xl text-center text-xs text-slate-500">
           © University of New Hampshire | ECenter | 21 Madbury Road, Durham, NH
         </p>
       </footer>
 
       {/* Phones: thumb-reachable tab bar. */}
+      {moreOpen && (
+        <>
+          <button type="button" className="fixed inset-0 z-40 bg-navy-900/30 lg:hidden" onClick={() => setMoreOpen(false)} aria-label="Close menu" tabIndex={-1} />
+          <div
+            className="fixed inset-x-0 bottom-0 z-50 rounded-t-2xl bg-white pb-[calc(env(safe-area-inset-bottom)+64px)] shadow-raised lg:hidden"
+            role="menu"
+            aria-label="More"
+          >
+            <ul className="mx-auto max-w-md divide-y divide-slate-100 py-1">
+              {mobileMore.map((item) => (
+                <li key={item.to}>
+                  <NavLink
+                    to={item.to}
+                    role="menuitem"
+                    className={({ isActive }) =>
+                      `flex min-h-[52px] items-center gap-3 px-5 text-sm font-semibold ${isActive ? 'text-teal-700' : 'text-navy-800'}`
+                    }
+                  >
+                    <Icon name={item.icon} />
+                    {item.label}
+                  </NavLink>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </>
+      )}
+
       <nav
-        className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 backdrop-blur md:hidden"
+        className="fixed inset-x-0 bottom-0 z-50 border-t border-slate-200 bg-white/95 backdrop-blur lg:hidden"
         style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
         aria-label="Community"
       >
         <ul className="mx-auto flex max-w-md">
-          {mobileNav.map((item) => (
+          {mobilePrimary.map((item) => (
             <li key={item.to} className="flex-1">
               <NavLink
                 to={item.to}
@@ -217,7 +312,7 @@ export function CommunityShell({ children }: { children: ReactNode }) {
                     {isActive && <span className="absolute inset-x-4 top-0 h-0.5 rounded-full bg-teal" aria-hidden="true" />}
                     <Icon name={item.icon} />
                     <span>{item.label}</span>
-                    {'badge' in item && !!item.badge && (
+                    {!!item.badge && (
                       <span className="absolute right-[calc(50%-20px)] top-1.5 min-w-[18px] rounded-full bg-urgent px-1 text-center text-[10px] font-bold leading-[18px] text-white" aria-label={`${item.badge} unread`}>
                         {item.badge > 99 ? '99+' : item.badge}
                       </span>
@@ -227,6 +322,30 @@ export function CommunityShell({ children }: { children: ReactNode }) {
               </NavLink>
             </li>
           ))}
+          {guest ? (
+            <li className="flex-1">
+              <Link to="/login" className="flex min-h-[56px] flex-col items-center justify-center gap-0.5 text-[11px] font-semibold text-slate-500">
+                <Icon name="signin" />
+                <span>Sign in</span>
+              </Link>
+            </li>
+          ) : (
+            <li className="flex-1">
+              <button
+                type="button"
+                onClick={() => setMoreOpen((open) => !open)}
+                aria-expanded={moreOpen}
+                aria-haspopup="menu"
+                className={`relative flex min-h-[56px] w-full flex-col items-center justify-center gap-0.5 text-[11px] font-semibold ${
+                  moreOpen || moreActive ? 'text-teal-700' : 'text-slate-500'
+                }`}
+              >
+                {moreActive && <span className="absolute inset-x-4 top-0 h-0.5 rounded-full bg-teal" aria-hidden="true" />}
+                <Icon name="more" />
+                <span>More</span>
+              </button>
+            </li>
+          )}
         </ul>
       </nav>
     </div>

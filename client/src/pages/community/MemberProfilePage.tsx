@@ -5,6 +5,7 @@ import { api, openSignedUrl } from '../../lib/api.ts';
 import { useApi } from '../../lib/hooks.ts';
 import type { PublicMember } from '../../lib/types.ts';
 import { useAuth } from '../../state/AuthContext.tsx';
+import { MemberBusinesses } from './BusinessesPage.tsx';
 
 /** A member's community profile: public fields only, as returned by the server. */
 export function MemberProfilePage() {
@@ -110,6 +111,7 @@ export function MemberProfilePage() {
           )}
         </section>
       )}
+      <MemberBusinesses userId={member.id} />
     </div>
   );
 }

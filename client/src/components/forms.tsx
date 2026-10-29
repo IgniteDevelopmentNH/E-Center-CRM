@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
+import { EventOptionFields, GuestVisibilityField } from './eventOptions.tsx';
 import { ApiError, api } from '../lib/api.ts';
 import { DEFAULT_EVENT_LOCATION, SYSTEM_TAG_CREATED_ACCOUNT } from '../lib/constants.ts';
 import {
@@ -730,6 +731,9 @@ export function EventForm({
   const [communityVisible, setCommunityVisible] = useState(initial?.communityVisible ?? false);
   const [communityDetails, setCommunityDetails] = useState(initial?.communityDetails ?? '');
   const [communityRsvp, setCommunityRsvp] = useState(initial?.communityRsvp ?? false);
+  const [communityAge21, setCommunityAge21] = useState(initial?.communityAge21 ?? false);
+  const [communityRsvpPublic, setCommunityRsvpPublic] = useState(initial?.communityRsvpPublic ?? false);
+  const [communityGuestVisible, setCommunityGuestVisible] = useState(initial?.communityGuestVisible ?? true);
   const [contactIds, setContactIds] = useState<string[]>([]);
 
   const { data: contactData } = useApi<{ contacts: Contact[] }>('/contacts?limit=200&sort=name');
@@ -753,6 +757,9 @@ export function EventForm({
               communityVisible,
               communityDetails: communityVisible ? communityDetails : null,
               communityRsvp: communityVisible && communityRsvp,
+              communityAge21: communityVisible && communityAge21,
+              communityRsvpPublic: communityVisible && communityRsvp && communityRsvpPublic,
+              communityGuestVisible,
               ...(initial ? {} : { contactIds }),
             };
             const response = initial
@@ -826,6 +833,14 @@ export function EventForm({
               <TextArea value={communityDetails} onChange={(event) => setCommunityDetails(event.target.value)} rows={3} />
             </Field>
             <Checkbox label={'Let members say "I\'ll be there!"'} checked={communityRsvp} onChange={setCommunityRsvp} />
+            <EventOptionFields
+              rsvpEnabled={communityRsvp}
+              age21={communityAge21}
+              onAge21={setCommunityAge21}
+              attendeesPublic={communityRsvpPublic}
+              onAttendeesPublic={setCommunityRsvpPublic}
+            />
+            <GuestVisibilityField value={communityGuestVisible} onChange={setCommunityGuestVisible} />
           </div>
         )}
       </div>

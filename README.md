@@ -272,6 +272,18 @@ npx wrangler d1 execute ecenter-crm --remote \
   --file=./worker/src/db/migrations/2026-10-20-community-v2.sql
 ```
 
+`2026-10-28-community-v3.sql` adds event options (21+, public attendee lists, hiding from guests),
+group-only posts, blocked emails, groups, businesses and competitions. It is additive too: new
+columns with safe defaults (every existing post stays visible to everyone, including guests) and new
+tables. It also inserts rows only: an "ECenter staff" community identity for every existing staff
+user, and a blocked-email entry for every member who was already removed. Apply it **before**
+deploying the matching build:
+
+```bash
+npx wrangler d1 execute ecenter-crm --remote \
+  --file=./worker/src/db/migrations/2026-10-28-community-v3.sql
+```
+
 Locally, `npm run migrate` adds any missing columns to an older dev database before applying
 `schema.sql`, so an existing `worker/data/dev.db` upgrades in place.
 
@@ -343,7 +355,11 @@ under `/admin`.
 
 | Path | Who | What |
 | --- | --- | --- |
-| `/` | Members, staff | Community feed (signed-out visitors see the join / sign-in page) |
+| `/` | Members, staff, guests | Community feed (signed-out visitors see the join / sign-in page, with "Continue as a guest") |
+| `/posts/:id`, `/events/:id` | Members, staff, guests | A post or event (guests get a read-only view) |
+| `/competitions`, `/competitions/:id` | Members, staff, guests | ECenter competitions and their deadlines |
+| `/groups`, `/groups/:slug` | Members, staff | Topic groups, group feeds, join requests and moderation |
+| `/businesses`, `/businesses/:id` | Members, staff | Member business profiles: logo, about, hiring/networking, photos |
 | `/signup` | Anyone | Two-step onboarding: account and role, then an optional "about you" step |
 | `/mentorship` | Members, staff | Recommended mentors; browse, search and filter all mentors |
 | `/network` | Members, staff | Member directory with type and topic filters |
@@ -351,7 +367,7 @@ under `/admin`.
 | `/profile` | Signed in | Your own profile, photo, private resume, email and password |
 | `/members/:id` | Members, staff | A member's public profile |
 | `/login`, `/verify-email`, `/forgot-password`, `/reset-password` | Anyone | Sign-in and account flows |
-| `/admin/*` | Staff only | The CRM: Dashboard, Contacts, Notes, Follow-ups, Organizations, Events, **Posts**, **Members**, Settings |
+| `/admin/*` | Staff only | The CRM: Dashboard, Contacts, Notes, Follow-ups, Organizations, Events, **Posts**, **Members**, **Groups**, **Competitions**, Settings |
 
 The old CRM paths (`/contacts`, `/notes`, `/tasks`, `/organizations`, `/events`, `/settings`)
 redirect to their `/admin/...` equivalents and keep any query string. The CRM's API paths are
@@ -369,9 +385,19 @@ unchanged. New staff APIs live under `/api/admin/*` and community APIs under `/a
 - Community routes use two guards. `requireCommunityViewer` (an active member, or any staff user)
   covers reading. `requireActiveCommunityMember` covers acting as a community identity, such as
   messaging.
-- Staff join the community through an explicit **staff identity** (Profile, then "Create my
-  community profile"). It is labelled "ECenter staff" and is never linked to a contact. It leaves CRM
-  access exactly as it was. **No administrative route can read private conversations.**
+- Every staff user has an **ECenter staff** community identity, created with the account (and by
+  the v3 migration for existing staff), so staff are listed under ECenter staff in the Network. It is
+  never linked to a contact and leaves CRM access exactly as it was. **No administrative route can
+  read private conversations.**
+- **Guests** (no account) use the read-only `/api/public/*` routes: the main feed, upcoming events
+  and competitions. They see only posts for everyone that the author has not hidden from guests, and
+  only CRM events marked visible to guests. Comments, attendee lists, member profiles and photos are
+  never shown to guests, and member authors appear as first name and last initial.
+- **Posting** is off by default for students and mentors. Staff grant "post with approval" or "post
+  without approval" per person in Admin > Members, where they can also grant **"Can create groups"**.
+- **Blocked emails**: removing (deactivating) a member blocks their email from signing up or being
+  used in an email change. Settings > Blocked users lists them; unblocking (or reactivating the
+  member) lifts the block and restores the account.
 - Staff switch between the interfaces from the avatar menu ("Switch to community portal" /
   "Switch to admin CRM").
 
@@ -539,6 +565,32 @@ New audit actions:
 - Each CRM event can have a **community description** (shown instead of the staff description) and
   **"I'll be there!" RSVPs**.
 - Staff see who RSVP'd in the event panel, and in Admin > Posts for event posts.
+- Event posts and CRM events have three more options: **21+** (an RSVP must confirm "I'm over 21",
+  stored on the RSVP), **show the attendee list to members** (otherwise only the organiser and staff
+  see it), and **hide from guests**.
+- Published competitions' deadlines also appear in Upcoming events, linking to the competition.
+
+### Groups
+
+- Eight default groups (Entrepreneurship, Finance, Accounting, Marketing, Sales, Technology,
+  Fundraising, Social Impact) are created on first use. Staff create more in Admin > Groups, and
+  members with "Can create groups" create their own and become its moderator.
+- Moderators edit the group, switch it between **public** (anyone joins instantly) and **private**
+  (people request to join and a moderator approves; posts and members are visible to members
+  only), approve or decline requests, remove members and appoint other moderators. Staff owners and
+  editors moderate every group.
+- A post can go to **everyone** (main feed) or **only specific groups**: then it appears only in
+  those groups' feeds, never in the main feed or to guests, and "Email members" only emails those
+  groups' members. Members can post only to groups they have joined.
+
+### Businesses and competitions
+
+- Students and mentors create up to five business profiles each: logo, tagline, about, industry,
+  website, location, hiring (with details), looking to network (with what for), and up to 12
+  photos. The owner and staff owners/editors can edit or remove one; it is hidden while the owner's
+  account is not active.
+- Staff post competitions in Admin > Competitions with any number of dated deadlines, publish,
+  unpublish, archive or delete them. Members and guests see published ones.
 
 ### Notification emails
 

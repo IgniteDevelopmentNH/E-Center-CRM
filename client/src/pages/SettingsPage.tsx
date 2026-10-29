@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { BlockedUsersSection } from './admin/BlockedUsersSection.tsx';
 import { ContentHistorySection } from './admin/ContentHistorySection.tsx';
 import { ConfirmDialog, Modal } from '../components/overlays.tsx';
 import {
@@ -92,6 +93,8 @@ export function SettingsPage() {
           </Detail>
         </dl>
       </section>
+
+      <BlockedUsersSection canEdit={canEdit} />
 
       <ContentHistorySection canEdit={canEdit} />
 

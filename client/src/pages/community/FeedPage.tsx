@@ -5,20 +5,41 @@ import { DateBadge, MemberPostEditor, PostCard } from '../../components/posts.ts
 import { EmptyState, ErrorBlock, LoadingBlock, Spinner } from '../../components/ui.tsx';
 import { ApiError, api } from '../../lib/api.ts';
 import { formatTime } from '../../lib/format.ts';
-import { useApi } from '../../lib/hooks.ts';
+import { useApi, useCommunityBase } from '../../lib/hooks.ts';
 import type { CommunityEvent, FeedPost } from '../../lib/types.ts';
 import { useAuth } from '../../state/AuthContext.tsx';
 
 export function eventHref(event: CommunityEvent): string {
+  if (event.source === 'deadline') return `/competitions/${event.competitionId}`;
   return event.source === 'post' ? `/posts/${event.id}` : `/events/${event.id}`;
+}
+
+function GuestSummary() {
+  return (
+    <section className="card overflow-hidden" aria-label="Join the community">
+      <div className="h-14 bg-gradient-to-r from-navy to-teal-700" aria-hidden="true" />
+      <div className="space-y-3 p-5">
+        <p className="font-bold text-navy-800">Welcome to the ECenter community</p>
+        <p className="text-sm text-slate-600">
+          You're browsing as a guest. Create an account to comment, RSVP, join groups, list your business and meet mentors.
+        </p>
+        <Link to="/signup" className="btn-primary w-full">Create an account</Link>
+        <Link to="/login" className="btn-ghost w-full">Sign in</Link>
+      </div>
+    </section>
+  );
 }
 
 function ProfileSummary() {
   const { user, community, isStaff } = useAuth();
+  if (!user) return <GuestSummary />;
   const name = community ? `${community.profile.firstName} ${community.profile.lastName}` : (user?.name ?? '');
   const links = [
     { to: '/mentorship', label: 'Mentorship' },
     { to: '/network', label: 'Network' },
+    { to: '/groups', label: 'Groups' },
+    { to: '/businesses', label: 'Businesses' },
+    { to: '/competitions', label: 'Competitions' },
     ...(community && community.postPermission !== 'none' ? [{ to: '/my-posts', label: 'My posts' }] : []),
     { to: '/profile', label: 'My profile' },
   ];
@@ -51,7 +72,8 @@ function ProfileSummary() {
 }
 
 export function UpcomingEvents({ limit = 5, compact }: { limit?: number; compact?: boolean }) {
-  const { data, loading, error, reload } = useApi<{ events: CommunityEvent[] }>(`/community/events?limit=${limit}`);
+  const base = useCommunityBase();
+  const { data, loading, error, reload } = useApi<{ events: CommunityEvent[] }>(`${base}/events?limit=${limit}`);
   return (
     <section className={compact ? '' : 'card p-5'} aria-labelledby="upcoming-events">
       <h2 id="upcoming-events" className="text-sm font-bold uppercase tracking-wide text-navy-800">
@@ -74,6 +96,7 @@ export function UpcomingEvents({ limit = 5, compact }: { limit?: number; compact
               <Link to={eventHref(event)} className="-mx-2 flex gap-3 rounded-lg p-2 transition hover:bg-slate-50">
                 <DateBadge iso={event.startsAt} />
                 <span className="min-w-0">
+                  {event.source === 'deadline' && <span className="block text-[10px] font-bold uppercase tracking-wide text-amber-700">Deadline</span>}
                   <span className="block font-semibold leading-snug text-navy-800">{event.name}</span>
                   <span className="block text-xs text-slate-500">
                     <time dateTime={event.startsAt}>{formatTime(event.startsAt)}</time>
@@ -90,7 +113,8 @@ export function UpcomingEvents({ limit = 5, compact }: { limit?: number; compact
 }
 
 function UpcomingEventsStrip() {
-  const { data } = useApi<{ events: CommunityEvent[] }>('/community/events?limit=8');
+  const base = useCommunityBase();
+  const { data } = useApi<{ events: CommunityEvent[] }>(`${base}/events?limit=8`);
   if (!data || data.events.length === 0) return null;
   return (
     <section className="lg:hidden" aria-labelledby="events-strip">
@@ -101,6 +125,7 @@ function UpcomingEventsStrip() {
             <Link to={eventHref(event)} className="card flex h-full items-center gap-3 p-3 active:bg-slate-50">
               <DateBadge iso={event.startsAt} />
               <span className="min-w-0">
+                {event.source === 'deadline' && <span className="block text-[10px] font-bold uppercase tracking-wide text-amber-700">Deadline</span>}
                 <span className="line-clamp-2 text-sm font-semibold leading-snug text-navy-800">{event.name}</span>
                 <span className="block truncate text-xs text-slate-500">
                   {formatTime(event.startsAt)}
@@ -135,6 +160,7 @@ function ShareBox({ onCreate }: { onCreate: () => void }) {
 
 export function FeedPage() {
   const { community } = useAuth();
+  const base = useCommunityBase();
   const [posts, setPosts] = useState<FeedPost[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -145,10 +171,10 @@ export function FeedPage() {
 
   const load = useCallback(async (after: string | null) => {
     const query = after ? `?cursor=${encodeURIComponent(after)}` : '';
-    const response = await api.get<{ posts: FeedPost[]; nextCursor: string | null }>(`/community/feed${query}`);
+    const response = await api.get<{ posts: FeedPost[]; nextCursor: string | null }>(`${base}/feed${query}`);
     setPosts((current) => (after ? [...current, ...response.posts] : response.posts));
     setCursor(response.nextCursor);
-  }, []);
+  }, [base]);
 
   const initial = useCallback(() => {
     setLoading(true);

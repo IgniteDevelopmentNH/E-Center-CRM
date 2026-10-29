@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ApiError, api } from './api.ts';
+import { useAuth } from '../state/AuthContext.tsx';
 
 interface AsyncState<T> {
   data: T | null;
@@ -70,4 +71,10 @@ export function useEscapeKey(handler: () => void, active = true): void {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [handler, active]);
+}
+
+/** Community reads go to /community when signed in, and to the read-only /public API for guests. */
+export function useCommunityBase(): '/community' | '/public' {
+  const { user } = useAuth();
+  return user ? '/community' : '/public';
 }

@@ -7,6 +7,7 @@ import type { FeedPost, PostComment } from '../lib/types.ts';
 import { useAuth } from '../state/AuthContext.tsx';
 import { useToast } from '../state/ToastContext.tsx';
 import { MemberAvatar, accountTypeLabel } from './community.tsx';
+import { Age21Badge, AttendeesButton, AudienceField, EventOptionFields, GuestVisibilityField } from './eventOptions.tsx';
 import { MentionTextarea, RichText } from './mentions.tsx';
 import { Modal } from './overlays.tsx';
 import { Checkbox, Field, TextInput } from './ui.tsx';
@@ -135,46 +136,106 @@ export function RsvpButton({
   id,
   going,
   count,
+  age21 = false,
+  showAttendees = false,
   onChange,
 }: {
   target: 'post' | 'event';
   id: string;
   going: boolean;
   count: number;
+  /** 21+ event: saying "I'll be there!" asks the person to confirm they are over 21. */
+  age21?: boolean;
+  /** The organiser shared the list (or the viewer organised it / is staff). */
+  showAttendees?: boolean;
   onChange: (state: { going: boolean; rsvpCount: number }) => void;
 }) {
-  const { isActiveMember } = useAuth();
+  const { user, isActiveMember } = useAuth();
   const toast = useToast();
   const [busy, setBusy] = useState(false);
-  async function toggle() {
+  const [confirming, setConfirming] = useState(false);
+  const [over21, setOver21] = useState(false);
+
+  async function send(next: boolean) {
     setBusy(true);
     try {
-      onChange(await api.post<{ going: boolean; rsvpCount: number }>(`/community/${target === 'post' ? 'posts' : 'events'}/${id}/rsvp`, { going: !going }));
+      onChange(
+        await api.post<{ going: boolean; rsvpCount: number }>(`/community/${target === 'post' ? 'posts' : 'events'}/${id}/rsvp`, {
+          going: next,
+          over21: next && age21 ? true : undefined,
+        }),
+      );
+      setConfirming(false);
     } catch (caught) {
       toast.error(caught instanceof ApiError ? caught.message : 'That did not work.');
     } finally {
       setBusy(false);
     }
   }
+
+  function toggle() {
+    if (!going && age21) {
+      setOver21(false);
+      setConfirming(true);
+      return;
+    }
+    void send(!going);
+  }
+
   return (
     <div className="flex flex-wrap items-center gap-3">
       {isActiveMember && (
-        <button
-          type="button"
-          onClick={toggle}
-          disabled={busy}
-          aria-pressed={going}
-          className={going ? 'btn-secondary' : 'btn-primary'}
-        >
+        <button type="button" onClick={toggle} disabled={busy} aria-pressed={going} className={going ? 'btn-secondary' : 'btn-primary'}>
           {going ? "✓ You're going" : "I'll be there!"}
         </button>
       )}
+      {!user && (
+        <Link to="/login" className="btn-primary">
+          Sign in to RSVP
+        </Link>
+      )}
+      {age21 && <Age21Badge />}
       <span className="text-sm text-slate-600" aria-live="polite">
         {count === 0 ? 'Be the first to say you’re going' : `${count} ${count === 1 ? 'person' : 'people'} going`}
       </span>
+      {showAttendees && !!user && <AttendeesButton target={target} id={id} count={count} />}
       {going && (
         <span className="w-full text-xs text-slate-500">Changed your mind? Tap the button again to remove your RSVP.</span>
       )}
+      <Modal
+        open={confirming}
+        title="This is a 21+ event"
+        onClose={() => setConfirming(false)}
+        width="max-w-md"
+        footer={
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <button type="button" className="btn-ghost" onClick={() => setConfirming(false)} disabled={busy}>Cancel</button>
+            <button type="button" className="btn-primary" onClick={() => send(true)} disabled={busy || !over21}>
+              {busy ? 'Saving...' : "I'll be there!"}
+            </button>
+          </div>
+        }
+      >
+        <p className="text-sm text-slate-600">The organiser has marked this event 21 and over.</p>
+        <div className="mt-3">
+          <Checkbox label="I'm over 21" checked={over21} onChange={setOver21} />
+        </div>
+      </Modal>
+    </div>
+  );
+}
+
+/** Group and 21+ markers shown on a post. */
+export function PostBadges({ post }: { post: FeedPost }) {
+  if (!post.groups.length && !post.event?.age21) return null;
+  return (
+    <div className="mt-2 flex flex-wrap gap-1.5">
+      {post.event?.age21 && <Age21Badge />}
+      {post.groups.map((group) => (
+        <Link key={group.id} to={`/groups/${group.slug}`} className="chip bg-teal-50 text-teal-800 hover:underline">
+          {group.name}
+        </Link>
+      ))}
     </div>
   );
 }
@@ -189,6 +250,7 @@ export function PostCard({ post, onChange }: { post: FeedPost; onChange: (patch:
     <article className="card overflow-hidden" aria-labelledby={`post-${post.id}`}>
       <div className="p-4 sm:p-6">
         <PostAuthor post={post} />
+        <PostBadges post={post} />
         <h2 id={`post-${post.id}`} className="mt-3 text-lg font-bold text-navy-800 sm:text-xl">
           <Link to={`/posts/${post.id}`} className="hover:underline">
             {post.title}
@@ -279,7 +341,7 @@ export function CommentsSection({
   onComments: (comments: PostComment[]) => void;
   onCountChange: (count: number) => void;
 }) {
-  const { isActiveMember, isStaff } = useAuth();
+  const { user, isActiveMember, isStaff } = useAuth();
   const toast = useToast();
   const [replyTo, setReplyTo] = useState<PostComment | null>(null);
 
@@ -367,7 +429,12 @@ export function CommentsSection({
         />
       ) : (
         <p className="mt-4 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">
-          {isStaff ? (
+          {!user ? (
+            <>
+              <Link to="/login" className="font-semibold text-teal-700 hover:underline">Sign in</Link> or{' '}
+              <Link to="/signup" className="font-semibold text-teal-700 hover:underline">create an account</Link> to read and write comments.
+            </>
+          ) : isStaff ? (
             <>
               <Link to="/profile" className="font-semibold text-teal-700 hover:underline">Create your community profile</Link> to comment. You can still remove comments as staff.
             </>
@@ -442,11 +509,16 @@ export function MemberPostEditor({
   needsApproval,
   onClose,
   onSaved,
+  defaultAudience = 'everyone',
+  defaultGroupIds = [],
 }: {
   post: FeedPost | null;
   needsApproval: boolean;
   onClose: () => void;
   onSaved: (post: FeedPost) => void;
+  /** Opened from a group page: start as a post to that group. */
+  defaultAudience?: 'everyone' | 'groups';
+  defaultGroupIds?: string[];
 }) {
   const toast = useToast();
   const [title, setTitle] = useState(post?.title ?? '');
@@ -456,6 +528,11 @@ export function MemberPostEditor({
   const [startsAt, setStartsAt] = useState(toDateTimeInput(post?.event?.startsAt ?? null));
   const [location, setLocation] = useState(post?.event?.location ?? '');
   const [rsvpEnabled, setRsvpEnabled] = useState(post?.event?.rsvpEnabled ?? true);
+  const [age21, setAge21] = useState(post?.event?.age21 ?? false);
+  const [attendeesPublic, setAttendeesPublic] = useState(post?.event?.attendeesPublic ?? false);
+  const [guestVisible, setGuestVisible] = useState(post?.guestVisible ?? true);
+  const [audience, setAudience] = useState<'everyone' | 'groups'>(post?.audience ?? defaultAudience);
+  const [groupIds, setGroupIds] = useState<string[]>(post?.groups.map((g) => g.id) ?? defaultGroupIds);
   const [image, setImage] = useState<File | null>(null);
   const [removeImage, setRemoveImage] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -476,6 +553,11 @@ export function MemberPostEditor({
         eventStartsAt: isEvent && startsAt ? new Date(startsAt).toISOString() : null,
         eventLocation: isEvent ? location : null,
         rsvpEnabled: isEvent && rsvpEnabled,
+        eventAge21: isEvent && age21,
+        rsvpListPublic: isEvent && rsvpEnabled && attendeesPublic,
+        guestVisible,
+        audience,
+        groupIds: audience === 'groups' ? groupIds : [],
       };
       let saved = savedId.current
         ? (await api.put<{ post: FeedPost }>(`/community/posts/${savedId.current}`, payload)).post
@@ -541,9 +623,19 @@ export function MemberPostEditor({
                 <TextInput value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Room, building or online link" />
               </Field>
               <Checkbox label={'Let people say "I\'ll be there!"'} checked={rsvpEnabled} onChange={setRsvpEnabled} />
+              <EventOptionFields
+                rsvpEnabled={rsvpEnabled}
+                age21={age21}
+                onAge21={setAge21}
+                attendeesPublic={attendeesPublic}
+                onAttendeesPublic={setAttendeesPublic}
+              />
             </div>
           )}
         </div>
+
+        <AudienceField audience={audience} onAudience={setAudience} groupIds={groupIds} onGroupIds={setGroupIds} error={errorFor('Groups')} />
+        {audience === 'everyone' && <GuestVisibilityField value={guestVisible} onChange={setGuestVisible} />}
 
         <div>
           <p className="label">Image</p>

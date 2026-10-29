@@ -13,7 +13,7 @@ function safeNext(value: string | null): string | null {
 }
 
 export function LoginPage() {
-  const { signIn, user, isStaff } = useAuth();
+  const { signIn, user, isStaff, continueAsGuest } = useAuth();
   const [params] = useSearchParams();
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
@@ -92,6 +92,19 @@ export function LoginPage() {
         <Link to="/signup" className="font-semibold text-teal-700 hover:underline">
           Create an account
         </Link>
+      </p>
+      <p className="mt-2 text-center text-sm text-slate-600">
+        Just looking?{' '}
+        <button
+          type="button"
+          className="font-semibold text-teal-700 hover:underline"
+          onClick={() => {
+            continueAsGuest();
+            navigate('/');
+          }}
+        >
+          Continue as a guest
+        </button>
       </p>
     </AuthSplitLayout>
   );

@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { Combobox } from '../../components/Combobox.tsx';
+import { AudienceField, EventOptionFields, GuestVisibilityField } from '../../components/eventOptions.tsx';
 import { MentionTextarea, plainText } from '../../components/mentions.tsx';
 import { ConfirmDialog, Modal } from '../../components/overlays.tsx';
 import { Checkbox, Chip, EmptyState, ErrorBlock, Field, LoadingBlock, Pagination, TextArea, TextInput } from '../../components/ui.tsx';
@@ -317,6 +318,11 @@ function PostEditor({ post, onClose, onSaved }: { post: AdminPost | null; onClos
   const [startsAt, setStartsAt] = useState(toDateTimeInput(post?.eventDetails?.startsAt ?? null));
   const [location, setLocation] = useState(post?.eventDetails?.location ?? '');
   const [rsvpEnabled, setRsvpEnabled] = useState(post?.eventDetails?.rsvpEnabled ?? true);
+  const [age21, setAge21] = useState(post?.eventDetails?.age21 ?? false);
+  const [attendeesPublic, setAttendeesPublic] = useState(post?.eventDetails?.attendeesPublic ?? false);
+  const [guestVisible, setGuestVisible] = useState(post?.guestVisible ?? true);
+  const [audience, setAudience] = useState<'everyone' | 'groups'>(post?.audience ?? 'everyone');
+  const [groupIds, setGroupIds] = useState<string[]>(post?.groups.map((g) => g.id) ?? []);
   const [notify, setNotify] = useState(false);
   const [image, setImage] = useState<File | null>(null);
   const [removeImage, setRemoveImage] = useState(false);
@@ -345,6 +351,11 @@ function PostEditor({ post, onClose, onSaved }: { post: AdminPost | null; onClos
         eventStartsAt: mode === 'own' && startsAt ? new Date(startsAt).toISOString() : null,
         eventLocation: mode === 'own' ? location : null,
         rsvpEnabled: mode === 'own' && rsvpEnabled,
+        eventAge21: mode === 'own' && age21,
+        rsvpListPublic: mode === 'own' && rsvpEnabled && attendeesPublic,
+        guestVisible,
+        audience,
+        groupIds: audience === 'groups' ? groupIds : [],
       };
       const saved = savedId.current
         ? (await api.put<{ post: AdminPost }>(`/admin/posts/${savedId.current}`, payload)).post
@@ -443,6 +454,13 @@ function PostEditor({ post, onClose, onSaved }: { post: AdminPost | null; onClos
                 <TextInput value={location} onChange={(e) => setLocation(e.target.value)} />
               </Field>
               <Checkbox label={'Let members say "I\'ll be there!"'} checked={rsvpEnabled} onChange={setRsvpEnabled} />
+              <EventOptionFields
+                rsvpEnabled={rsvpEnabled}
+                age21={age21}
+                onAge21={setAge21}
+                attendeesPublic={attendeesPublic}
+                onAttendeesPublic={setAttendeesPublic}
+              />
               <p className="text-xs text-slate-500">Shows in the feed and in Upcoming events.</p>
             </div>
           )}
@@ -454,6 +472,9 @@ function PostEditor({ post, onClose, onSaved }: { post: AdminPost | null; onClos
             </div>
           )}
         </fieldset>
+
+        <AudienceField audience={audience} onAudience={setAudience} groupIds={groupIds} onGroupIds={setGroupIds} allGroups error={errorFor('Groups')} />
+        {audience === 'everyone' && <GuestVisibilityField value={guestVisible} onChange={setGuestVisible} />}
 
         <div>
           <p className="label">Image</p>

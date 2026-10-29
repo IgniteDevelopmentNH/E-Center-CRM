@@ -1,8 +1,10 @@
 import { Link } from 'react-router-dom';
 import { AuthSplitLayout } from '../../components/community.tsx';
+import { useAuth } from '../../state/AuthContext.tsx';
 
 /** `/` for signed-out visitors: the way in to signup or sign-in. */
 export function LandingPage() {
+  const { continueAsGuest } = useAuth();
   return (
     <AuthSplitLayout>
       <h2 className="text-2xl font-bold text-navy-800">Join the ECenter community</h2>
@@ -17,6 +19,10 @@ export function LandingPage() {
         <Link to="/login" className="btn-ghost w-full">
           Sign in
         </Link>
+        <button type="button" className="btn-quiet w-full" onClick={continueAsGuest}>
+          Continue as a guest
+        </button>
+        <p className="text-center text-xs text-slate-500">Guests can read the feed, events and competitions.</p>
       </div>
     </AuthSplitLayout>
   );

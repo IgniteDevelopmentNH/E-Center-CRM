@@ -133,6 +133,9 @@ export interface CrmEvent {
   communityDetails: string | null;
   communityRsvp: boolean;
   communityRsvpCount: number;
+  communityAge21: boolean;
+  communityRsvpPublic: boolean;
+  communityGuestVisible: boolean;
   communityNotifiedAt: string | null;
   attendeeCount: number;
   externalId: string | null;
@@ -296,6 +299,7 @@ export interface CommunityState {
   };
   resume: { fileName: string; size: number; uploadedAt: string; public: boolean } | null;
   postPermission: PostPermission;
+  canCreateGroups: boolean;
   notifications: { messages: boolean; mentions: boolean; announcements: boolean };
 }
 
@@ -324,8 +328,9 @@ export type MembersResponse = Paged & { members: PublicMember[] };
 
 export interface CommunityEvent {
   id: string;
-  /** 'event' = a CRM event shown to the community; 'post' = an event post. */
-  source: 'event' | 'post';
+  /** 'event' = a CRM event shown to the community; 'post' = an event post; 'deadline' = a competition deadline. */
+  source: 'event' | 'post' | 'deadline';
+  competitionId: string | null;
   name: string;
   startsAt: string;
   endsAt: string | null;
@@ -342,6 +347,23 @@ export interface CommunityEventDetail {
   rsvpEnabled: boolean;
   rsvpCount: number;
   going: boolean;
+  age21: boolean;
+  attendeesPublic: boolean;
+  guestVisible: boolean;
+}
+
+export interface Attendee {
+  id: string;
+  name: string;
+  accountType: string;
+  photoUrl: string | null;
+}
+
+export interface GroupRef {
+  id: string;
+  slug: string;
+  name: string;
+  privacy: string;
 }
 
 export interface FeedPost {
@@ -368,7 +390,12 @@ export interface FeedPost {
     rsvpEnabled: boolean;
     rsvpCount: number;
     going: boolean;
+    age21: boolean;
+    attendeesPublic: boolean;
   } | null;
+  audience: 'everyone' | 'groups';
+  guestVisible: boolean;
+  groups: GroupRef[];
   linkedEvent: { id: string; name: string; startsAt: string; endsAt: string | null; location: string | null } | null;
   likeCount: number;
   commentCount: number;
@@ -423,7 +450,17 @@ export interface AdminPost {
   eventStartsAt: string | null;
   eventCommunityVisible: boolean;
   isEvent: boolean;
-  eventDetails: { startsAt: string; endsAt: string | null; location: string | null; rsvpEnabled: boolean } | null;
+  eventDetails: {
+    startsAt: string;
+    endsAt: string | null;
+    location: string | null;
+    rsvpEnabled: boolean;
+    age21: boolean;
+    attendeesPublic: boolean;
+  } | null;
+  audience: 'everyone' | 'groups';
+  guestVisible: boolean;
+  groups: { id: string; name: string }[];
   status: 'draft' | 'pending' | 'published' | 'rejected' | 'archived';
   deleted: boolean;
   publishedAt: string | null;
@@ -486,6 +523,7 @@ export interface AdminCommunityAccount {
   resumePublic: boolean;
   postPermissionOverride: PostPermission | null;
   postPermission: PostPermission;
+  canCreateGroups: boolean;
   createdAt: string;
   activatedAt: string | null;
   lastLoginAt: string | null;
@@ -513,4 +551,80 @@ export interface LinkCandidate {
   organizationName: string | null;
   createdAt: string;
   linkedToAnotherAccount: boolean;
+}
+
+/* ------------------------------------------------------------ v3 -- */
+
+export interface CommunityGroup {
+  id: string;
+  slug: string;
+  name: string;
+  description: string | null;
+  privacy: 'public' | 'private';
+  isDefault: boolean;
+  archived: boolean;
+  memberCount: number;
+  postCount: number;
+  pendingCount: number;
+  membership: { role: 'member' | 'moderator'; status: 'active' | 'pending' } | null;
+  canModerate: boolean;
+  canRead: boolean;
+  moderators?: { id: string; name: string }[];
+}
+
+export interface GroupMember {
+  id: string;
+  name: string;
+  accountType: string;
+  photoUrl: string | null;
+  role: 'member' | 'moderator';
+  requestedAt: string;
+  joinedAt: string | null;
+}
+
+export interface Business {
+  id: string;
+  name: string;
+  tagline: string | null;
+  description: string | null;
+  industry: string | null;
+  website: string | null;
+  location: string | null;
+  hiring: boolean;
+  hiringDetails: string | null;
+  networking: boolean;
+  lookingFor: string | null;
+  logoUrl: string | null;
+  photoCount: number;
+  photos: { id: string; url: string; caption: string | null }[];
+  owner: { id: string; name: string; accountType: string; photoUrl: string | null };
+  canEdit: boolean;
+  updatedAt: string;
+}
+
+export interface Competition {
+  id: string;
+  title: string;
+  summary: string | null;
+  description: string | null;
+  prize: string | null;
+  eligibility: string | null;
+  linkUrl: string | null;
+  imageUrl: string | null;
+  status: 'draft' | 'published' | 'archived';
+  publishedAt: string | null;
+  deadlines: { id: string; label: string; dueAt: string; passed: boolean }[];
+  nextDeadline: { id: string; label: string; dueAt: string } | null;
+  updatedAt: string;
+}
+
+export interface BlockedEmail {
+  id: string;
+  email: string;
+  userId: string | null;
+  name: string | null;
+  accountType: string | null;
+  reason: string | null;
+  blockedByName: string | null;
+  createdAt: string;
 }

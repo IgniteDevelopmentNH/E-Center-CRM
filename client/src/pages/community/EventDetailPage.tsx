@@ -2,13 +2,16 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { DateBadge, RsvpButton, eventWhen } from '../../components/posts.tsx';
 import { ErrorBlock, LoadingBlock } from '../../components/ui.tsx';
-import { useApi } from '../../lib/hooks.ts';
+import { useApi, useCommunityBase } from '../../lib/hooks.ts';
 import type { CommunityEventDetail } from '../../lib/types.ts';
+import { useAuth } from '../../state/AuthContext.tsx';
 
 /** An ECenter event shown to the community (public details only). */
 export function EventDetailPage() {
   const { id } = useParams();
-  const { data, loading, error, reload } = useApi<{ event: CommunityEventDetail }>(id ? `/community/events/${id}` : null);
+  const { isStaff } = useAuth();
+  const base = useCommunityBase();
+  const { data, loading, error, reload } = useApi<{ event: CommunityEventDetail }>(id ? `${base}/events/${id}` : null);
   const [event, setEvent] = useState<CommunityEventDetail | null>(null);
 
   useEffect(() => {
@@ -50,6 +53,8 @@ export function EventDetailPage() {
                 id={event.id}
                 going={event.going}
                 count={event.rsvpCount}
+                age21={event.age21}
+                showAttendees={event.attendeesPublic || isStaff}
                 onChange={(state) => setEvent({ ...event, going: state.going, rsvpCount: state.rsvpCount })}
               />
             </div>

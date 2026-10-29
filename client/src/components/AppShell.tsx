@@ -17,6 +17,8 @@ const TABS = [
   { to: '/admin/events', label: 'Events', icon: '▣' },
   { to: '/admin/posts', label: 'Posts', icon: '▤' },
   { to: '/admin/members', label: 'Members', icon: '◎' },
+  { to: '/admin/groups', label: 'Groups', icon: '⊕' },
+  { to: '/admin/competitions', label: 'Competitions', icon: '★' },
   { to: '/admin/settings', label: 'Settings', icon: '⚙' },
 ];
 

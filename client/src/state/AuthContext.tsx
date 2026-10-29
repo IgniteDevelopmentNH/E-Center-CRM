@@ -29,6 +29,28 @@ interface AuthState {
   isOwner: boolean;
   /** Has an ACTIVE community identity (required to message members). */
   isActiveMember: boolean;
+  /** Browsing without an account: read-only feed, events and competitions. */
+  isGuest: boolean;
+  continueAsGuest: () => void;
+}
+
+const GUEST_KEY = 'ecenter-guest';
+
+function readGuestFlag(): boolean {
+  try {
+    return sessionStorage.getItem(GUEST_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function writeGuestFlag(on: boolean): void {
+  try {
+    if (on) sessionStorage.setItem(GUEST_KEY, '1');
+    else sessionStorage.removeItem(GUEST_KEY);
+  } catch {
+    /* storage unavailable: guest mode lasts for this page only */
+  }
 }
 
 const AuthContext = createContext<AuthState | null>(null);
@@ -38,6 +60,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [customer, setCustomer] = useState<{ name: string; slug: string } | null>(null);
   const [community, setCommunity] = useState<CommunityState | null>(null);
   const [ready, setReady] = useState(false);
+  const [guestChosen, setGuestChosen] = useState(readGuestFlag);
+
+  const continueAsGuest = useCallback(() => {
+    writeGuestFlag(true);
+    setGuestChosen(true);
+  }, []);
 
   const clear = useCallback(() => {
     setUser(null);
@@ -62,6 +90,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(me.user);
     setCustomer(me.customer);
     setCommunity(me.community);
+    writeGuestFlag(false);
+    setGuestChosen(false);
   }, []);
 
   // Restore an existing session on load.
@@ -117,8 +147,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       canEdit: isStaff && user?.role !== 'viewer',
       isOwner: user?.role === 'owner',
       isActiveMember: community?.status === 'active',
+      isGuest: !user && guestChosen,
+      continueAsGuest,
     };
-  }, [user, customer, community, ready, signIn, signOut, startSession, refresh]);
+  }, [user, customer, community, ready, signIn, signOut, startSession, refresh, guestChosen, continueAsGuest]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

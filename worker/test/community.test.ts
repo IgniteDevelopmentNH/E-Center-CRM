@@ -635,8 +635,8 @@ describe('private messaging', () => {
       (await api('POST', `/api/community/conversations/${conversationId}/messages`, { body: 'sneaky' }, carol.token)).status,
       404,
     );
-    // Administrative access does not open private conversations.
-    assert.equal((await api('GET', `/api/community/conversations/${conversationId}/messages`, undefined, ownerToken)).status, 403);
+    // Administrative access does not open private conversations (staff are just another non-participant).
+    assert.equal((await api('GET', `/api/community/conversations/${conversationId}/messages`, undefined, ownerToken)).status, 404);
     const carolList = await api('GET', '/api/community/conversations', undefined, carol.token);
     assert.ok(!carolList.body.conversations.some((c: any) => c.id === conversationId));
   });
@@ -663,10 +663,10 @@ describe('private messaging', () => {
     assert.equal(older.body.messages[2].body, 'Reply 1');
   });
 
-  it('staff message members only through an explicit community identity', async () => {
-    assert.equal((await api('POST', '/api/community/conversations', { recipientId: alice.userId }, editorToken)).status, 403);
+  it('staff message members through their ECenter staff community identity', async () => {
+    // Every staff user has one (created with the account, or by the v3 migration for existing staff).
     const identity = await api('POST', '/api/community/staff-identity', undefined, editorToken);
-    assert.equal(identity.status, 201);
+    assert.equal(identity.status, 200);
     assert.equal(identity.body.community.accountType, 'staff');
     const started = await api('POST', '/api/community/conversations', { recipientId: alice.userId }, editorToken);
     assert.equal(started.status, 200);
