@@ -17,6 +17,13 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
-    sourcemap: true,
+    // Source maps are left out of production so the original code is not served publicly.
+    sourcemap: false,
+    rollupOptions: {
+      output: {
+        // Rarely changes, so browsers keep it cached across deploys.
+        manualChunks: { react: ['react', 'react-dom', 'react-router-dom'] },
+      },
+    },
   },
 });

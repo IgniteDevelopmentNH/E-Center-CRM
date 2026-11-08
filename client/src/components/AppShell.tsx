@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { api, buildQuery } from '../lib/api.ts';
@@ -15,7 +15,7 @@ const TABS = [
   { to: '/admin/tasks', label: 'Follow-ups', icon: '✓' },
   { to: '/admin/organizations', label: 'Organizations', icon: '⌂' },
   { to: '/admin/events', label: 'Events', icon: '▣' },
-  { to: '/admin/posts', label: 'Posts', icon: '▤' },
+  { to: '/admin/posts', label: 'Feed events', icon: '▤' },
   { to: '/admin/members', label: 'Members', icon: '◎' },
   { to: '/admin/groups', label: 'Groups', icon: '⊕' },
   { to: '/admin/competitions', label: 'Competitions', icon: '★' },
@@ -26,14 +26,18 @@ const TABS = [
 function usePendingPosts(): number {
   const [count, setCount] = useState(0);
   const location = useLocation();
+  const lastLoaded = useRef(0);
   useEffect(() => {
     let cancelled = false;
-    const load = () =>
-      api
+    const load = () => {
+      lastLoaded.current = Date.now();
+      return api
         .get<{ pendingCount: number }>('/admin/posts?status=pending&limit=1')
         .then((r) => !cancelled && setCount(r.pendingCount))
         .catch(() => undefined);
-    void load();
+    };
+    // Moving between pages should not mean a request every time.
+    if (Date.now() - lastLoaded.current > 15_000) void load();
     const timer = window.setInterval(() => document.visibilityState === 'visible' && load(), 60_000);
     return () => {
       cancelled = true;
@@ -50,8 +54,18 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [fabOpen, setFabOpen] = useState(false);
   const navigate = useNavigate();
 
+  // The browser's own toolbar matches on phones; the portal keeps UNH blue.
+  useEffect(() => {
+    const meta = document.querySelector('meta[name="theme-color"]');
+    const previous = meta?.getAttribute('content');
+    meta?.setAttribute('content', '#33383e');
+    return () => {
+      if (previous) meta?.setAttribute('content', previous);
+    };
+  }, []);
+
   return (
-    <div className="flex min-h-screen flex-col">
+    <div className="theme-crm flex min-h-screen flex-col">
       <header className="sticky top-0 z-40 bg-navy text-white shadow-raised">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-3 px-4 py-3 sm:flex-nowrap">
           <Link to="/admin" className="flex shrink-0 items-center gap-3" aria-label="UNH ECenter CRM home">
@@ -370,7 +384,7 @@ function SearchGroup({ label, children }: { label: string; children: ReactNode }
   return (
     <div className="mb-1">
       <p className="px-2 py-1 text-[11px] font-bold uppercase tracking-wide text-slate-400">{label}</p>
-      {children}
+      <Suspense fallback={<Spinner label="Loading" />}>{children}</Suspense>
     </div>
   );
 }

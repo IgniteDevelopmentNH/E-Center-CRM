@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Link, NavLink, useLocation } from 'react-router-dom';
 import { api } from '../lib/api.ts';
 import { useEscapeKey } from '../lib/hooks.ts';
 import { useAuth } from '../state/AuthContext.tsx';
 import { MemberAvatar, accountTypeLabel } from './community.tsx';
+import { LoadingBlock } from './ui.tsx';
 
 /** Fired by the Messages page after reading a conversation, so the badge updates at once. */
 export const UNREAD_REFRESH_EVENT = 'ecenter:unread-refresh';
@@ -77,6 +78,7 @@ function Icon({ name }: { name: string }) {
 function useUnreadCount(enabled: boolean): number {
   const [unread, setUnread] = useState(0);
   const location = useLocation();
+  const lastLoaded = useRef(0);
 
   useEffect(() => {
     if (!enabled) {
@@ -84,12 +86,15 @@ function useUnreadCount(enabled: boolean): number {
       return;
     }
     let cancelled = false;
-    const load = () =>
-      api
+    const load = () => {
+      lastLoaded.current = Date.now();
+      return api
         .get<{ unread: number }>('/community/messages/unread-count')
         .then((r) => !cancelled && setUnread(r.unread))
         .catch(() => undefined);
-    void load();
+    };
+    // Moving between pages should not mean a request every time.
+    if (Date.now() - lastLoaded.current > 15_000) void load();
     const timer = window.setInterval(() => {
       if (document.visibilityState === 'visible') void load();
     }, 30_000);
@@ -133,7 +138,7 @@ export function CommunityShell({ children }: { children: ReactNode }) {
         { to: '/competitions', label: 'Competitions', icon: 'competitions' },
         { to: '/mentorship', label: 'Mentorship', icon: 'mentorship' },
         { to: '/messages', label: 'Messages', icon: 'messages', badge: unread },
-        ...(canPost ? [{ to: '/my-posts', label: 'Posts', icon: 'posts' }] : []),
+        ...(canPost ? [{ to: '/my-posts', label: 'My events', icon: 'posts' }] : []),
       ];
   // Phones and tablets get a bottom tab bar: four tabs plus "More" for the rest.
   const primaryPaths = guest ? ['/', '/competitions'] : ['/', '/network', '/groups', '/messages'];
@@ -223,7 +228,7 @@ export function CommunityShell({ children }: { children: ReactNode }) {
                   </Link>
                   {canPost && (
                     <Link to="/my-posts" className="flex min-h-[44px] items-center px-4 text-sm hover:bg-slate-50" role="menuitem">
-                      My posts
+                      My events
                     </Link>
                   )}
                   {isStaff && (
@@ -252,7 +257,7 @@ export function CommunityShell({ children }: { children: ReactNode }) {
         id="main"
         className={`mx-auto w-full max-w-6xl flex-1 px-3 sm:px-4 ${fullBleed ? 'pb-20 pt-3 lg:py-6' : 'pb-28 pt-4 lg:py-6'}`}
       >
-        {children}
+        <Suspense fallback={<LoadingBlock label="Loading" />}>{children}</Suspense>
       </main>
 
       <footer className="hidden border-t border-slate-200 bg-white px-4 py-5 lg:block">
@@ -264,9 +269,9 @@ export function CommunityShell({ children }: { children: ReactNode }) {
       {/* Phones: thumb-reachable tab bar. */}
       {moreOpen && (
         <>
-          <button type="button" className="fixed inset-0 z-40 bg-navy-900/30 lg:hidden" onClick={() => setMoreOpen(false)} aria-label="Close menu" tabIndex={-1} />
+          <button type="button" className="fixed inset-0 z-30 bg-navy-900/30 lg:hidden" onClick={() => setMoreOpen(false)} aria-label="Close menu" tabIndex={-1} />
           <div
-            className="fixed inset-x-0 bottom-0 z-50 rounded-t-2xl bg-white pb-[calc(env(safe-area-inset-bottom)+64px)] shadow-raised lg:hidden"
+            className="fixed inset-x-0 bottom-0 z-30 rounded-t-2xl bg-white pb-[calc(env(safe-area-inset-bottom)+64px)] shadow-raised lg:hidden"
             role="menu"
             aria-label="More"
           >
@@ -291,7 +296,7 @@ export function CommunityShell({ children }: { children: ReactNode }) {
       )}
 
       <nav
-        className="fixed inset-x-0 bottom-0 z-50 border-t border-slate-200 bg-white/95 backdrop-blur lg:hidden"
+        className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 backdrop-blur lg:hidden"
         style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
         aria-label="Community"
       >

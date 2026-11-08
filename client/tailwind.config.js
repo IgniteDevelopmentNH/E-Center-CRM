@@ -5,15 +5,16 @@ export default {
     extend: {
       colors: {
         // UNH shield navy, and the teal used for growth/innovation accents.
+        // Defined in index.css so the admin CRM can swap the whole family for granite.
         navy: {
-          DEFAULT: '#003366',
-          50: '#eef3f9',
-          100: '#d6e2ef',
-          200: '#a9c2db',
-          600: '#00437f',
-          700: '#003366',
-          800: '#002850',
-          900: '#001c39',
+          DEFAULT: 'rgb(var(--navy-700) / <alpha-value>)',
+          50: 'rgb(var(--navy-50) / <alpha-value>)',
+          100: 'rgb(var(--navy-100) / <alpha-value>)',
+          200: 'rgb(var(--navy-200) / <alpha-value>)',
+          600: 'rgb(var(--navy-600) / <alpha-value>)',
+          700: 'rgb(var(--navy-700) / <alpha-value>)',
+          800: 'rgb(var(--navy-800) / <alpha-value>)',
+          900: 'rgb(var(--navy-900) / <alpha-value>)',
         },
         teal: {
           DEFAULT: '#008080',

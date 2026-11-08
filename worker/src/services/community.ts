@@ -4,7 +4,7 @@ import { normaliseEmail } from '../lib/communityValidate.ts';
 import { bufToHex } from '../lib/encoding.ts';
 import { isUniqueViolation } from '../lib/http.ts';
 import { newId } from '../lib/ids.ts';
-import { signValue } from '../lib/signedToken.ts';
+import { IMAGE_LINK_ALIGN_SECONDS, imageVersion, signValue } from '../lib/signedToken.ts';
 import { formatDisplayDate, nowIso } from '../lib/time.ts';
 import type { Ctx } from '../router.ts';
 
@@ -485,15 +485,21 @@ export async function loadTags(db: Db, userIds: string[]): Promise<Map<string, M
 /** Columns a public profile is built from. Nothing private or staff-only is selected. */
 export const PUBLIC_PROFILE_COLUMNS = `
   p.user_id, p.first_name, p.last_name, p.bio, p.linkedin_url, p.photo_key, p.major,
-  p.graduation_year, p.role_title, p.company, p.scheduling_url, ca.account_type, ca.status,
+  p.graduation_year, p.school_type, p.school_name, p.role_title, p.company, p.scheduling_url, ca.account_type, ca.status,
   (ca.resume_public = 1 AND ca.resume_key IS NOT NULL) AS public_resume`;
 
 const PHOTO_URL_TTL_SECONDS = 60 * 60 * 6;
 
 export async function photoUrl(ctx: Ctx, userId: string, photoKey: unknown): Promise<string | null> {
   if (!photoKey) return null;
-  const token = await signValue({ k: 'photo', u: userId }, ctx.config.tokenSecret, PHOTO_URL_TTL_SECONDS);
-  return `/api/community/files/photo/${userId}?token=${encodeURIComponent(token)}`;
+  const token = await signValue({ k: 'photo', u: userId }, ctx.config.tokenSecret, PHOTO_URL_TTL_SECONDS, IMAGE_LINK_ALIGN_SECONDS);
+  return `/api/community/files/photo/${userId}?token=${encodeURIComponent(token)}&v=${imageVersion(photoKey)}`;
+}
+
+export function schoolLabel(row: Record<string, unknown>): string | null {
+  if (row.school_type === 'unh') return 'UNH';
+  if (row.school_type === 'other') return row.school_name ? String(row.school_name) : 'Another school';
+  return null;
 }
 
 /**
@@ -514,6 +520,7 @@ export async function publicMemberOut(ctx: Ctx, row: Record<string, unknown>, ta
     photoUrl: available ? await photoUrl(ctx, String(row.user_id), row.photo_key) : null,
     major: type === 'student' && row.major ? String(row.major) : null,
     graduationYear: type === 'student' && row.graduation_year ? Number(row.graduation_year) : null,
+    school: type === 'student' ? schoolLabel(row) : null,
     roleTitle: type !== 'student' && row.role_title ? String(row.role_title) : null,
     company: type !== 'student' && row.company ? String(row.company) : null,
     schedulingUrl: type === 'mentor' && row.scheduling_url ? String(row.scheduling_url) : null,

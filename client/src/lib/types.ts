@@ -136,6 +136,9 @@ export interface CrmEvent {
   communityAge21: boolean;
   communityRsvpPublic: boolean;
   communityGuestVisible: boolean;
+  communityRsvpGuests: boolean;
+  communityIcons: string[];
+  communityQuestions: RegistrationQuestion[];
   communityNotifiedAt: string | null;
   attendeeCount: number;
   externalId: string | null;
@@ -294,6 +297,8 @@ export interface CommunityState {
     roleTitle: string | null;
     company: string | null;
     schedulingUrl: string | null;
+    schoolType: 'unh' | 'other' | null;
+    schoolName: string | null;
     interests: InterestTag[];
     help: InterestTag[];
   };
@@ -315,6 +320,7 @@ export interface PublicMember {
   photoUrl: string | null;
   major: string | null;
   graduationYear: number | null;
+  school: string | null;
   roleTitle: string | null;
   company: string | null;
   schedulingUrl: string | null;
@@ -350,7 +356,52 @@ export interface CommunityEventDetail {
   age21: boolean;
   attendeesPublic: boolean;
   guestVisible: boolean;
+  guestRsvp: boolean;
+  icons: string[];
+  questions: RegistrationQuestion[];
 }
+
+export type QuestionType = 'yesno' | 'text' | 'choice' | 'checkboxes';
+
+export interface RegistrationQuestion {
+  id: string;
+  type: QuestionType;
+  label: string;
+  required: boolean;
+  options: string[];
+}
+
+export type RsvpAnswers = Record<string, string | string[]>;
+
+export interface EventResponses {
+  questions: RegistrationQuestion[];
+  responses: {
+    kind: 'member' | 'guest';
+    name: string;
+    type: string;
+    email: string | null;
+    over21: boolean;
+    answers: RsvpAnswers;
+    createdAt: string;
+  }[];
+}
+
+export interface CompetitionDeadlineItem {
+  id: string;
+  label: string;
+  dueAt: string;
+  passed: boolean;
+  competitionId: string;
+  title: string;
+  summary: string | null;
+  prize: string | null;
+}
+
+/** One entry in the events feed. */
+export type FeedItem =
+  | { kind: 'post'; startsAt: string; post: FeedPost }
+  | { kind: 'event'; startsAt: string; event: CommunityEventDetail }
+  | { kind: 'deadline'; startsAt: string; deadline: CompetitionDeadlineItem };
 
 export interface Attendee {
   id: string;
@@ -392,6 +443,9 @@ export interface FeedPost {
     going: boolean;
     age21: boolean;
     attendeesPublic: boolean;
+    guestRsvp: boolean;
+    icons: string[];
+    questions: RegistrationQuestion[];
   } | null;
   audience: 'everyone' | 'groups';
   guestVisible: boolean;
@@ -457,6 +511,9 @@ export interface AdminPost {
     rsvpEnabled: boolean;
     age21: boolean;
     attendeesPublic: boolean;
+    guestRsvp: boolean;
+    icons: string[];
+    questions: RegistrationQuestion[];
   } | null;
   audience: 'everyone' | 'groups';
   guestVisible: boolean;
@@ -536,6 +593,7 @@ export interface AdminCommunityAccount {
     company: string | null;
     major: string | null;
     graduationYear: number | null;
+    school: string | null;
     linkedinUrl: string | null;
     schedulingUrl: string | null;
   };
@@ -627,4 +685,13 @@ export interface BlockedEmail {
   reason: string | null;
   blockedByName: string | null;
   createdAt: string;
+}
+
+export interface PastOrganization {
+  id: string;
+  name: string;
+  role: string | null;
+  joinedAt: string | null;
+  leftAt: string;
+  organizationId: string | null;
 }

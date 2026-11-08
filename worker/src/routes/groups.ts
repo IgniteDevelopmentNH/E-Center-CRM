@@ -40,7 +40,7 @@ const GROUP_SELECT = `
          (SELECT COUNT(*) FROM group_members gm WHERE gm.group_id = g.id AND gm.status = 'active') AS member_count,
          (SELECT COUNT(*) FROM group_members gm WHERE gm.group_id = g.id AND gm.status = 'pending') AS pending_count,
          (SELECT COUNT(*) FROM post_groups pg JOIN posts p ON p.id = pg.post_id
-           WHERE pg.group_id = g.id AND p.status = 'published' AND p.deleted_at IS NULL) AS post_count,
+           WHERE pg.group_id = g.id AND p.status = 'published' AND p.deleted_at IS NULL AND p.event_starts_at IS NOT NULL) AS post_count,
          me.role AS my_role, me.status AS my_status
     FROM community_groups g
     LEFT JOIN group_members me ON me.group_id = g.id AND me.user_id = ?`;
@@ -172,6 +172,7 @@ export function register(router: Router): void {
       `p.status = 'published'`,
       'p.deleted_at IS NULL',
       'p.published_at IS NOT NULL',
+      'p.event_starts_at IS NOT NULL',
       'EXISTS (SELECT 1 FROM post_groups pg WHERE pg.post_id = p.id AND pg.group_id = ?)',
     ];
     const params: SqlParam[] = [auth.customerId, group.id];

@@ -1,38 +1,65 @@
-import type { ReactNode } from 'react';
+import { Suspense, lazy } from 'react';
+import type { ComponentType, ReactNode } from 'react';
 import { Link, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { AppShell } from './components/AppShell.tsx';
 import { CommunityShell } from './components/CommunityShell.tsx';
 import { LoadingBlock } from './components/ui.tsx';
-import { ContactsPage } from './pages/ContactsPage.tsx';
-import { DashboardPage } from './pages/DashboardPage.tsx';
-import { EventsPage } from './pages/EventsPage.tsx';
-import { LoginPage } from './pages/LoginPage.tsx';
-import { NotesPage } from './pages/NotesPage.tsx';
-import { OrganizationsPage } from './pages/OrganizationsPage.tsx';
-import { SettingsPage } from './pages/SettingsPage.tsx';
-import { TasksPage } from './pages/TasksPage.tsx';
-import { MembersAdminPage } from './pages/admin/MembersAdminPage.tsx';
-import { PostsAdminPage } from './pages/admin/PostsAdminPage.tsx';
-import { EventDetailPage } from './pages/community/EventDetailPage.tsx';
-import { FeedPage } from './pages/community/FeedPage.tsx';
-import { MyPostsPage } from './pages/community/MyPostsPage.tsx';
-import { PostDetailPage } from './pages/community/PostDetailPage.tsx';
-import { UnsubscribePage } from './pages/community/UnsubscribePage.tsx';
-import { ForgotPasswordPage, ResetPasswordPage } from './pages/community/PasswordPages.tsx';
-import { LandingPage } from './pages/community/LandingPage.tsx';
-import { MemberProfilePage } from './pages/community/MemberProfilePage.tsx';
-import { MentorshipPage } from './pages/community/MentorshipPage.tsx';
-import { MessagesPage } from './pages/community/MessagesPage.tsx';
-import { NetworkPage } from './pages/community/NetworkPage.tsx';
-import { ProfilePage } from './pages/community/ProfilePage.tsx';
-import { SignupPage } from './pages/community/SignupPage.tsx';
-import { VerifyEmailPage } from './pages/community/VerifyEmailPage.tsx';
-import { BusinessDetailPage, BusinessesPage } from './pages/community/BusinessesPage.tsx';
-import { CompetitionDetailPage, CompetitionsPage } from './pages/community/CompetitionsPage.tsx';
-import { GroupDetailPage, GroupsPage } from './pages/community/GroupsPage.tsx';
-import { CompetitionsAdminPage } from './pages/admin/CompetitionsAdminPage.tsx';
-import { GroupsAdminPage } from './pages/admin/GroupsAdminPage.tsx';
 import { useAuth } from './state/AuthContext.tsx';
+
+/**
+ * Each page is its own download, so nobody loads the CRM to read the feed. If a
+ * page's file has been replaced by a newer deploy, reloading picks up the new one.
+ */
+function page<M>(load: () => Promise<M>, name: keyof M) {
+  return lazy(async () => {
+    try {
+      const loaded = await load();
+      sessionStorage.removeItem('ecenter-reloaded');
+      return { default: loaded[name] as ComponentType };
+    } catch (error) {
+      if (!sessionStorage.getItem('ecenter-reloaded')) {
+        sessionStorage.setItem('ecenter-reloaded', '1');
+        window.location.reload();
+        return new Promise<{ default: ComponentType }>(() => undefined);
+      }
+      throw error;
+    }
+  });
+}
+
+const ContactsPage = page(() => import('./pages/ContactsPage.tsx'), 'ContactsPage');
+const DashboardPage = page(() => import('./pages/DashboardPage.tsx'), 'DashboardPage');
+const EventsPage = page(() => import('./pages/EventsPage.tsx'), 'EventsPage');
+const LoginPage = page(() => import('./pages/LoginPage.tsx'), 'LoginPage');
+const NotesPage = page(() => import('./pages/NotesPage.tsx'), 'NotesPage');
+const OrganizationsPage = page(() => import('./pages/OrganizationsPage.tsx'), 'OrganizationsPage');
+const SettingsPage = page(() => import('./pages/SettingsPage.tsx'), 'SettingsPage');
+const TasksPage = page(() => import('./pages/TasksPage.tsx'), 'TasksPage');
+const MembersAdminPage = page(() => import('./pages/admin/MembersAdminPage.tsx'), 'MembersAdminPage');
+const PostsAdminPage = page(() => import('./pages/admin/PostsAdminPage.tsx'), 'PostsAdminPage');
+const EventDetailPage = page(() => import('./pages/community/EventDetailPage.tsx'), 'EventDetailPage');
+const FeedPage = page(() => import('./pages/community/FeedPage.tsx'), 'FeedPage');
+const MyPostsPage = page(() => import('./pages/community/MyPostsPage.tsx'), 'MyPostsPage');
+const PostDetailPage = page(() => import('./pages/community/PostDetailPage.tsx'), 'PostDetailPage');
+const UnsubscribePage = page(() => import('./pages/community/UnsubscribePage.tsx'), 'UnsubscribePage');
+const ForgotPasswordPage = page(() => import('./pages/community/PasswordPages.tsx'), 'ForgotPasswordPage');
+const ResetPasswordPage = page(() => import('./pages/community/PasswordPages.tsx'), 'ResetPasswordPage');
+const LandingPage = page(() => import('./pages/community/LandingPage.tsx'), 'LandingPage');
+const MemberProfilePage = page(() => import('./pages/community/MemberProfilePage.tsx'), 'MemberProfilePage');
+const MentorshipPage = page(() => import('./pages/community/MentorshipPage.tsx'), 'MentorshipPage');
+const MessagesPage = page(() => import('./pages/community/MessagesPage.tsx'), 'MessagesPage');
+const NetworkPage = page(() => import('./pages/community/NetworkPage.tsx'), 'NetworkPage');
+const ProfilePage = page(() => import('./pages/community/ProfilePage.tsx'), 'ProfilePage');
+const SignupPage = page(() => import('./pages/community/SignupPage.tsx'), 'SignupPage');
+const VerifyEmailPage = page(() => import('./pages/community/VerifyEmailPage.tsx'), 'VerifyEmailPage');
+const BusinessDetailPage = page(() => import('./pages/community/BusinessesPage.tsx'), 'BusinessDetailPage');
+const BusinessesPage = page(() => import('./pages/community/BusinessesPage.tsx'), 'BusinessesPage');
+const CompetitionDetailPage = page(() => import('./pages/community/CompetitionsPage.tsx'), 'CompetitionDetailPage');
+const CompetitionsPage = page(() => import('./pages/community/CompetitionsPage.tsx'), 'CompetitionsPage');
+const GroupDetailPage = page(() => import('./pages/community/GroupsPage.tsx'), 'GroupDetailPage');
+const GroupsPage = page(() => import('./pages/community/GroupsPage.tsx'), 'GroupsPage');
+const CompetitionsAdminPage = page(() => import('./pages/admin/CompetitionsAdminPage.tsx'), 'CompetitionsAdminPage');
+const GroupsAdminPage = page(() => import('./pages/admin/GroupsAdminPage.tsx'), 'GroupsAdminPage');
 
 /** Old CRM paths (before the move under /admin) keep working: bookmarks, emails, muscle memory. */
 const LEGACY_ADMIN_PATHS = ['contacts', 'notes', 'tasks', 'organizations', 'events', 'settings'];
@@ -134,7 +161,14 @@ export function App() {
     );
   }
 
+  const pageFallback = (
+    <div className="grid min-h-screen place-items-center">
+      <LoadingBlock label="Loading" />
+    </div>
+  );
+
   return (
+    <Suspense fallback={pageFallback}>
     <Routes>
       {/* Public */}
       <Route path="/login" element={<LoginPage />} />
@@ -187,5 +221,6 @@ export function App() {
       />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+    </Suspense>
   );
 }

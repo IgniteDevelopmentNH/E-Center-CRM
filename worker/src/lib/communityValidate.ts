@@ -72,6 +72,8 @@ export function optionalGraduationYear(value: unknown, field = 'Graduation year'
   return year;
 }
 
+export const SCHOOL_TYPES = ['unh', 'other'] as const;
+
 export function password(value: unknown, field = 'Password'): string {
   if (typeof value !== 'string' || !value) throw badRequest(`${field} is required.`, field);
   if (value.length < 8) throw badRequest(`${field} must be at least 8 characters.`, field);

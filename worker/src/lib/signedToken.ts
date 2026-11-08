@@ -25,8 +25,11 @@ export async function signValue(
   payload: Record<string, string>,
   secret: string,
   ttlSeconds: number,
+  /** Rounds the expiry up to this interval, so the same link is issued for a while and browsers can cache it. */
+  alignSeconds = 1,
 ): Promise<string> {
-  const body = { ...payload, exp: String(Math.floor(Date.now() / 1000) + ttlSeconds) };
+  const exp = Math.ceil((Math.floor(Date.now() / 1000) + ttlSeconds) / alignSeconds) * alignSeconds;
+  const body = { ...payload, exp: String(exp) };
   const encoded = textToBase64Url(JSON.stringify(body));
   const key = await importHmacKey(secret);
   const signature = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(encoded));
@@ -55,4 +58,11 @@ export async function verifyValue(
   } catch {
     return null;
   }
+}
+
+/** Image links stay identical for an hour. `version` changes when the image is replaced. */
+export const IMAGE_LINK_ALIGN_SECONDS = 60 * 60;
+
+export function imageVersion(key: unknown): string {
+  return encodeURIComponent(String(key).split('/').pop() ?? '');
 }

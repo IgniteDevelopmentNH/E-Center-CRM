@@ -354,12 +354,17 @@ export function SearchableChecklist({
   onChange,
   placeholder = 'Search...',
   emptyText = 'No matches',
+  onCreate,
+  createLabel,
 }: {
   options: readonly { id: string; label: string; sublabel?: string | null }[];
   selected: string[];
   onChange: (ids: string[]) => void;
   placeholder?: string;
   emptyText?: string;
+  /** Offers to add what was typed when nothing has that exact name. */
+  onCreate?: (name: string) => void;
+  createLabel?: (name: string) => string;
 }) {
   const [query, setQuery] = useState('');
   const q = query.trim().toLowerCase();
@@ -372,6 +377,7 @@ export function SearchableChecklist({
 
   const toggle = (id: string) =>
     onChange(selected.includes(id) ? selected.filter((value) => value !== id) : [...selected, id]);
+  const canCreate = !!onCreate && !!q && !options.some((option) => option.label.trim().toLowerCase() === q);
 
   return (
     <div className="space-y-2">
@@ -387,6 +393,18 @@ export function SearchableChecklist({
           className="input pl-9"
         />
       </div>
+      {canCreate && (
+        <button
+          type="button"
+          className="btn-ghost w-full justify-start text-left"
+          onClick={() => {
+            onCreate(query.trim());
+            setQuery('');
+          }}
+        >
+          + {createLabel ? createLabel(query.trim()) : `Add “${query.trim()}”`}
+        </button>
+      )}
       <div className="max-h-52 space-y-0.5 overflow-y-auto rounded-lg border border-slate-200 p-2">
         {filtered.length === 0 ? (
           <p className="px-1 py-2 text-sm text-slate-500">{emptyText}</p>

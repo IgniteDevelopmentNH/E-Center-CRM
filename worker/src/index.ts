@@ -89,16 +89,34 @@ function corsHeaders(origin: string | null, allowed: string[]): Record<string, s
   };
 }
 
-function finalize(response: Response, origin: string | null, allowed: string[], isApi: boolean): Response {
+/** Guest pages are the same for everyone, so a burst of visitors is served from the edge cache. */
+const GUEST_CACHE_SECONDS = 30;
+
+function isGuestRead(req: Request, url: URL): boolean {
+  return req.method === 'GET' && url.pathname.startsWith('/api/public/') && !req.headers.has('Authorization');
+}
+
+/** Available on custom domains; on workers.dev this is simply null or a no-op. */
+function edgeCacheStore(): Cache | null {
+  return (globalThis as unknown as { caches?: { default?: Cache } }).caches?.default ?? null;
+}
+
+function finalize(
+  response: Response,
+  origin: string | null,
+  allowed: string[],
+  isApi: boolean,
+  cacheControl = 'no-store',
+): Response {
   const headers = new Headers(response.headers);
   for (const [key, value] of Object.entries(SECURITY_HEADERS)) headers.set(key, value);
-  if (isApi) headers.set('Cache-Control', 'no-store');
+  if (isApi) headers.set('Cache-Control', cacheControl);
   for (const [key, value] of Object.entries(corsHeaders(origin, allowed))) headers.set(key, value);
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
 export default {
-  async fetch(req: Request, env: Env): Promise<Response> {
+  async fetch(req: Request, env: Env, execution?: { waitUntil(promise: Promise<unknown>): void }): Promise<Response> {
     const url = new URL(req.url);
     const origin = req.headers.get('Origin');
     const allowed = [url.origin, ...(env.APP_URL ? [new URL(env.APP_URL).origin] : [])];
@@ -115,6 +133,14 @@ export default {
 
     if (url.pathname === '/api/health') {
       return finalize(jsonResponse({ ok: true, database: 'd1', storage: 'r2' }), origin, allowed, true);
+    }
+
+    const guestRead = isGuestRead(req, url);
+    const edgeCache = guestRead ? edgeCacheStore() : null;
+    const publicCaching = `public, max-age=${GUEST_CACHE_SECONDS}`;
+    if (edgeCache) {
+      const hit = await edgeCache.match(req).catch(() => undefined);
+      if (hit) return finalize(hit, origin, allowed, true, publicCaching);
     }
 
     try {
@@ -155,6 +181,16 @@ export default {
       ctx.params = matched.params;
 
       const response = await matched.handler(ctx);
+      if (guestRead && response.status === 200) {
+        if (edgeCache) {
+          const stored = new Response(response.clone().body, response);
+          stored.headers.set('Cache-Control', `public, s-maxage=${GUEST_CACHE_SECONDS}`);
+          const saving = edgeCache.put(req, stored).catch(() => undefined);
+          if (execution) execution.waitUntil(saving);
+          else await saving;
+        }
+        return finalize(response, origin, allowed, true, publicCaching);
+      }
       return finalize(response, origin, allowed, true);
     } catch (error) {
       return finalize(errorToResponse(error, true), origin, allowed, true);

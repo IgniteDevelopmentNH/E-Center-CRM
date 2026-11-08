@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { DateBadge, RsvpButton, eventWhen } from '../../components/posts.tsx';
+import { EventIconRow } from '../../components/eventOptions.tsx';
 import { ErrorBlock, LoadingBlock } from '../../components/ui.tsx';
 import { useApi, useCommunityBase } from '../../lib/hooks.ts';
 import type { CommunityEventDetail } from '../../lib/types.ts';
@@ -45,16 +46,21 @@ export function EventDetailPage() {
               {event.location && <p className="text-sm text-slate-600">{event.location}</p>}
             </div>
           </div>
+          <EventIconRow icons={event.icons} />
           {event.details && <p className="whitespace-pre-line text-[15px] leading-relaxed text-slate-700">{event.details}</p>}
           {event.rsvpEnabled && (
             <div className="border-t border-slate-100 pt-4">
               <RsvpButton
                 target="event"
                 id={event.id}
+                title={event.name}
                 going={event.going}
                 count={event.rsvpCount}
                 age21={event.age21}
+                guestRsvp={event.guestRsvp}
+                questions={event.questions}
                 showAttendees={event.attendeesPublic || isStaff}
+                showResponses={isStaff}
                 onChange={(state) => setEvent({ ...event, going: state.going, rsvpCount: state.rsvpCount })}
               />
             </div>

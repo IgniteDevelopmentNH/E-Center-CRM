@@ -214,7 +214,7 @@ export function TopicFilter({ value, onChange }: { value: string; onChange: (slu
 
 function subtitleFor(member: PublicMember): string | null {
   if (member.accountType === 'student') {
-    const parts = [member.major, member.graduationYear ? `Class of ${member.graduationYear}` : null].filter(Boolean);
+    const parts = [member.school, member.major, member.graduationYear ? `Class of ${member.graduationYear}` : null].filter(Boolean);
     return parts.length ? parts.join(' · ') : null;
   }
   const parts = [member.roleTitle, member.company].filter(Boolean);

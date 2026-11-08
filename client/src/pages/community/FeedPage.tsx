@@ -1,18 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { MemberAvatar, accountTypeLabel } from '../../components/community.tsx';
-import { DateBadge, MemberPostEditor, PostCard } from '../../components/posts.tsx';
-import { EmptyState, ErrorBlock, LoadingBlock, Spinner } from '../../components/ui.tsx';
-import { ApiError, api } from '../../lib/api.ts';
-import { formatTime } from '../../lib/format.ts';
+import { CrmEventCard, DateBadge, DeadlineCard, MemberPostEditor, PostCard } from '../../components/posts.tsx';
+import { EmptyState, ErrorBlock, LoadingBlock } from '../../components/ui.tsx';
+import { ApiError, api, buildQuery } from '../../lib/api.ts';
 import { useApi, useCommunityBase } from '../../lib/hooks.ts';
-import type { CommunityEvent, FeedPost } from '../../lib/types.ts';
+import type { Competition, FeedItem } from '../../lib/types.ts';
 import { useAuth } from '../../state/AuthContext.tsx';
-
-export function eventHref(event: CommunityEvent): string {
-  if (event.source === 'deadline') return `/competitions/${event.competitionId}`;
-  return event.source === 'post' ? `/posts/${event.id}` : `/events/${event.id}`;
-}
 
 function GuestSummary() {
   return (
@@ -40,7 +34,7 @@ function ProfileSummary() {
     { to: '/groups', label: 'Groups' },
     { to: '/businesses', label: 'Businesses' },
     { to: '/competitions', label: 'Competitions' },
-    ...(community && community.postPermission !== 'none' ? [{ to: '/my-posts', label: 'My posts' }] : []),
+    ...(community && community.postPermission !== 'none' ? [{ to: '/my-posts', label: 'My events' }] : []),
     { to: '/profile', label: 'My profile' },
   ];
   return (
@@ -71,71 +65,33 @@ function ProfileSummary() {
   );
 }
 
-export function UpcomingEvents({ limit = 5, compact }: { limit?: number; compact?: boolean }) {
+/** Open competitions and their next deadlines, beside the feed. */
+function OpenCompetitions() {
   const base = useCommunityBase();
-  const { data, loading, error, reload } = useApi<{ events: CommunityEvent[] }>(`${base}/events?limit=${limit}`);
+  const { data } = useApi<{ competitions: Competition[] }>(`${base}/competitions?limit=4`);
+  const open = data?.competitions.filter((c) => c.nextDeadline) ?? [];
   return (
-    <section className={compact ? '' : 'card p-5'} aria-labelledby="upcoming-events">
-      <h2 id="upcoming-events" className="text-sm font-bold uppercase tracking-wide text-navy-800">
-        Upcoming events
+    <section className="card p-5" aria-labelledby="open-competitions-heading">
+      <h2 id="open-competitions-heading" className="text-sm font-bold uppercase tracking-wide text-navy-800">
+        Competitions
       </h2>
-      {loading && <div className="mt-3"><Spinner label="Loading events" /></div>}
-      {error && (
-        <p className="mt-3 text-sm text-slate-500">
-          Events could not be loaded.{' '}
-          <button type="button" className="font-semibold text-teal-700 underline" onClick={reload}>Try again</button>
-        </p>
-      )}
-      {data && data.events.length === 0 && (
-        <p className="mt-3 text-sm text-slate-500">No upcoming events yet. Check back soon — new events show up here.</p>
-      )}
-      {data && data.events.length > 0 && (
+      {data && open.length === 0 && <p className="mt-3 text-sm text-slate-500">No open competitions right now.</p>}
+      {open.length > 0 && (
         <ul className="mt-3 space-y-1">
-          {data.events.map((event) => (
-            <li key={`${event.source}-${event.id}`}>
-              <Link to={eventHref(event)} className="-mx-2 flex gap-3 rounded-lg p-2 transition hover:bg-slate-50">
-                <DateBadge iso={event.startsAt} />
+          {open.map((competition) => (
+            <li key={competition.id}>
+              <Link to={`/competitions/${competition.id}`} className="-mx-2 flex gap-3 rounded-lg p-2 transition hover:bg-slate-50">
+                <DateBadge iso={competition.nextDeadline!.dueAt} />
                 <span className="min-w-0">
-                  {event.source === 'deadline' && <span className="block text-[10px] font-bold uppercase tracking-wide text-amber-700">Deadline</span>}
-                  <span className="block font-semibold leading-snug text-navy-800">{event.name}</span>
-                  <span className="block text-xs text-slate-500">
-                    <time dateTime={event.startsAt}>{formatTime(event.startsAt)}</time>
-                    {event.location ? ` · ${event.location}` : ''}
-                  </span>
+                  <span className="block font-semibold leading-snug text-navy-800">{competition.title}</span>
+                  <span className="block text-xs text-slate-500">{competition.nextDeadline!.label}</span>
                 </span>
               </Link>
             </li>
           ))}
         </ul>
       )}
-    </section>
-  );
-}
-
-function UpcomingEventsStrip() {
-  const base = useCommunityBase();
-  const { data } = useApi<{ events: CommunityEvent[] }>(`${base}/events?limit=8`);
-  if (!data || data.events.length === 0) return null;
-  return (
-    <section className="lg:hidden" aria-labelledby="events-strip">
-      <h2 id="events-strip" className="mb-2 px-1 text-xs font-bold uppercase tracking-wide text-navy-800">Upcoming events</h2>
-      <ul className="no-scrollbar -mx-3 flex snap-x snap-mandatory gap-3 overflow-x-auto px-3 pb-1 sm:-mx-4 sm:px-4">
-        {data.events.map((event) => (
-          <li key={`${event.source}-${event.id}`} className="w-64 shrink-0 snap-start">
-            <Link to={eventHref(event)} className="card flex h-full items-center gap-3 p-3 active:bg-slate-50">
-              <DateBadge iso={event.startsAt} />
-              <span className="min-w-0">
-                {event.source === 'deadline' && <span className="block text-[10px] font-bold uppercase tracking-wide text-amber-700">Deadline</span>}
-                <span className="line-clamp-2 text-sm font-semibold leading-snug text-navy-800">{event.name}</span>
-                <span className="block truncate text-xs text-slate-500">
-                  {formatTime(event.startsAt)}
-                  {event.location ? ` · ${event.location}` : ''}
-                </span>
-              </span>
-            </Link>
-          </li>
-        ))}
-      </ul>
+      <Link to="/competitions" className="mt-2 inline-block text-sm font-semibold text-teal-700 hover:underline">All competitions</Link>
     </section>
   );
 }
@@ -152,29 +108,39 @@ function ShareBox({ onCreate }: { onCreate: () => void }) {
         onClick={onCreate}
         className="min-h-[44px] flex-1 rounded-full border border-slate-300 px-4 text-left text-sm text-slate-500 transition hover:border-teal-200 hover:bg-slate-50"
       >
-        Share a post or event...
+        Add an event...
       </button>
     </div>
   );
 }
 
+const itemKey = (item: FeedItem) =>
+  item.kind === 'post' ? `post-${item.post.id}` : item.kind === 'event' ? `event-${item.event.id}` : `deadline-${item.deadline.id}`;
+
 export function FeedPage() {
   const { community } = useAuth();
   const base = useCommunityBase();
-  const [posts, setPosts] = useState<FeedPost[]>([]);
+  const [when, setWhen] = useState<'upcoming' | 'past'>('upcoming');
+  const [items, setItems] = useState<FeedItem[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [composing, setComposing] = useState(false);
-  const loaded = useRef(false);
+  const requestId = useRef(0);
 
-  const load = useCallback(async (after: string | null) => {
-    const query = after ? `?cursor=${encodeURIComponent(after)}` : '';
-    const response = await api.get<{ posts: FeedPost[]; nextCursor: string | null }>(`${base}/feed${query}`);
-    setPosts((current) => (after ? [...current, ...response.posts] : response.posts));
-    setCursor(response.nextCursor);
-  }, [base]);
+  const load = useCallback(
+    async (after: string | null) => {
+      const id = ++requestId.current;
+      const response = await api.get<{ items: FeedItem[]; nextCursor: string | null }>(
+        `${base}/feed${buildQuery({ when: when === 'past' ? 'past' : undefined, cursor: after })}`,
+      );
+      if (id !== requestId.current) return;
+      setItems((current) => (after ? [...current, ...response.items] : response.items));
+      setCursor(response.nextCursor);
+    },
+    [base, when],
+  );
 
   const initial = useCallback(() => {
     setLoading(true);
@@ -184,11 +150,7 @@ export function FeedPage() {
       .finally(() => setLoading(false));
   }, [load]);
 
-  useEffect(() => {
-    if (loaded.current) return;
-    loaded.current = true;
-    initial();
-  }, [initial]);
+  useEffect(initial, [initial]);
 
   async function more() {
     if (!cursor) return;
@@ -196,40 +158,75 @@ export function FeedPage() {
     try {
       await load(cursor);
     } catch {
-      setError('More posts could not be loaded.');
+      setError('More events could not be loaded.');
     } finally {
       setLoadingMore(false);
     }
   }
 
-  const patch = (id: string) => (change: Partial<FeedPost>) =>
-    setPosts((current) => current.map((p) => (p.id === id ? { ...p, ...change } : p)));
+  const replace = (key: string, next: (item: FeedItem) => FeedItem) =>
+    setItems((current) => current.map((item) => (itemKey(item) === key ? next(item) : item)));
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-[240px_minmax(0,1fr)_300px]">
-      <section className="min-w-0 space-y-4 sm:space-y-5 lg:order-2" aria-label="Community feed">
-        <h1 className="sr-only">Community feed</h1>
+      <section className="min-w-0 space-y-4 sm:space-y-5 lg:order-2" aria-label="Community events">
+        <h1 className="sr-only">Community events</h1>
         <ShareBox onCreate={() => setComposing(true)} />
 
-        {/* On phones and tablets, events are a compact swipeable strip so the feed stays first. */}
-        <UpcomingEventsStrip />
+        <div className="flex gap-1 rounded-lg bg-slate-100 p-1" role="group" aria-label="Which events">
+          {(['upcoming', 'past'] as const).map((value) => (
+            <button
+              key={value}
+              type="button"
+              aria-pressed={when === value}
+              onClick={() => setWhen(value)}
+              className={`min-h-[40px] flex-1 rounded-md text-sm font-semibold ${when === value ? 'bg-white text-navy-800 shadow-card' : 'text-slate-600'}`}
+            >
+              {value === 'upcoming' ? 'Upcoming events' : 'Past events'}
+            </button>
+          ))}
+        </div>
 
-        {loading && <LoadingBlock label="Loading the feed" />}
-        {!loading && error && !posts.length && <ErrorBlock message={error} onRetry={initial} />}
-        {!loading && !error && posts.length === 0 && (
-          <EmptyState title="Nothing posted yet" message="News, events and posts from the community will appear here." icon="▤" />
+        {loading && <LoadingBlock label="Loading events" />}
+        {!loading && error && !items.length && <ErrorBlock message={error} onRetry={initial} />}
+        {!loading && !error && items.length === 0 && (
+          <EmptyState
+            title={when === 'upcoming' ? 'No upcoming events yet' : 'No past events'}
+            message={when === 'upcoming' ? 'Events and competition deadlines will appear here.' : 'Events that have happened will appear here.'}
+            icon="▤"
+          />
         )}
-        {posts.map((post) => (
-          <PostCard key={post.id} post={post} onChange={patch(post.id)} />
-        ))}
-        {cursor && (
+        {!loading &&
+          items.map((item) => {
+            const key = itemKey(item);
+            if (item.kind === 'post') {
+              return (
+                <PostCard
+                  key={key}
+                  post={item.post}
+                  onChange={(change) => replace(key, (old) => (old.kind === 'post' ? { ...old, post: { ...old.post, ...change } } : old))}
+                />
+              );
+            }
+            if (item.kind === 'event') {
+              return (
+                <CrmEventCard
+                  key={key}
+                  event={item.event}
+                  onChange={(change) => replace(key, (old) => (old.kind === 'event' ? { ...old, event: { ...old.event, ...change } } : old))}
+                />
+              );
+            }
+            return <DeadlineCard key={key} deadline={item.deadline} />;
+          })}
+        {cursor && !loading && (
           <div className="flex justify-center">
             <button type="button" className="btn-ghost" onClick={more} disabled={loadingMore}>
-              {loadingMore ? 'Loading...' : 'Load more posts'}
+              {loadingMore ? 'Loading...' : 'Load more events'}
             </button>
           </div>
         )}
-        {error && posts.length > 0 && <p className="text-center text-sm text-urgent" role="alert">{error}</p>}
+        {error && items.length > 0 && <p className="text-center text-sm text-urgent" role="alert">{error}</p>}
       </section>
 
       <aside className="hidden lg:order-1 lg:block">
@@ -240,7 +237,7 @@ export function FeedPage() {
 
       <aside className="hidden lg:order-3 lg:block">
         <div className="lg:sticky lg:top-28">
-          <UpcomingEvents />
+          <OpenCompetitions />
         </div>
       </aside>
 
@@ -251,7 +248,7 @@ export function FeedPage() {
           onClose={() => setComposing(false)}
           onSaved={(saved) => {
             setComposing(false);
-            if (saved.status === 'published') setPosts((current) => [saved, ...current]);
+            if (saved.status === 'published') initial();
           }}
         />
       )}

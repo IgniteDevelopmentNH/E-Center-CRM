@@ -195,6 +195,9 @@ CREATE TABLE IF NOT EXISTS events (
   community_age21 INTEGER NOT NULL DEFAULT 0,
   community_rsvp_public INTEGER NOT NULL DEFAULT 0,
   community_guest_visible INTEGER NOT NULL DEFAULT 1,
+  community_rsvp_guests INTEGER NOT NULL DEFAULT 0,
+  community_icons TEXT NOT NULL DEFAULT '[]',
+  community_questions TEXT NOT NULL DEFAULT '[]',
   created_at     TEXT NOT NULL,
   updated_at     TEXT NOT NULL,
   deleted_at     TEXT,
@@ -347,7 +350,9 @@ CREATE TABLE IF NOT EXISTS community_profiles (
   photo_key        TEXT,
   photo_type       TEXT,
   major            TEXT,             -- students, optional
-  graduation_year  INTEGER,          -- students, optional
+  graduation_year  INTEGER,          -- students, required to finish signup
+  school_type      TEXT,             -- students: unh | other
+  school_name      TEXT,             -- students, when school_type = other
   role_title       TEXT,             -- mentors, optional
   company          TEXT,             -- mentors, optional
   scheduling_url   TEXT,             -- mentors, optional; validated https URL
@@ -416,6 +421,9 @@ CREATE TABLE IF NOT EXISTS posts (
   rsvp_enabled   INTEGER NOT NULL DEFAULT 0,
   event_age21    INTEGER NOT NULL DEFAULT 0,      -- RSVPs confirm "I'm over 21"
   rsvp_list_public INTEGER NOT NULL DEFAULT 0,    -- members can see who is going
+  rsvp_guests    INTEGER NOT NULL DEFAULT 0,      -- guests without an account may RSVP
+  event_icons    TEXT NOT NULL DEFAULT '[]',      -- JSON array of icon keys
+  rsvp_questions TEXT NOT NULL DEFAULT '[]',      -- JSON array of registration questions
   guest_visible  INTEGER NOT NULL DEFAULT 1,      -- shown to guests without an account
   audience       TEXT NOT NULL DEFAULT 'everyone', -- everyone | groups
   notified_at    TEXT,
@@ -555,6 +563,7 @@ CREATE TABLE IF NOT EXISTS event_rsvps (
   user_id     TEXT NOT NULL REFERENCES users(id),
   customer_id TEXT NOT NULL REFERENCES customers(id),
   over21_confirmed INTEGER NOT NULL DEFAULT 0,
+  answers_json TEXT NOT NULL DEFAULT '{}',
   created_at  TEXT NOT NULL,
   PRIMARY KEY (target_type, target_id, user_id)
 );
@@ -703,3 +712,42 @@ CREATE TABLE IF NOT EXISTS competition_deadlines (
   created_at     TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_competition_deadlines_due ON competition_deadlines(customer_id, due_at);
+
+-- ===========================================================================
+-- Community portal v4: guest RSVPs and organization history.
+-- ===========================================================================
+
+-- RSVPs from people without an account, on events that allow them.
+CREATE TABLE IF NOT EXISTS event_guest_rsvps (
+  id           TEXT PRIMARY KEY,
+  customer_id  TEXT NOT NULL REFERENCES customers(id),
+  target_type  TEXT NOT NULL,                  -- post | event
+  target_id    TEXT NOT NULL,
+  name         TEXT NOT NULL,
+  email        TEXT NOT NULL,                  -- trimmed + lowercased
+  over21_confirmed INTEGER NOT NULL DEFAULT 0,
+  answers_json TEXT NOT NULL DEFAULT '{}',
+  created_at   TEXT NOT NULL,
+  updated_at   TEXT NOT NULL,
+  UNIQUE (target_type, target_id, email)
+);
+
+-- Organizations a contact used to belong to. The name is kept as text so the
+-- history survives the organization itself being deleted.
+CREATE TABLE IF NOT EXISTS contact_org_history (
+  id                TEXT PRIMARY KEY,
+  customer_id       TEXT NOT NULL REFERENCES customers(id),
+  contact_id        TEXT NOT NULL REFERENCES contacts(id),
+  organization_id   TEXT REFERENCES organizations(id),
+  organization_name TEXT NOT NULL,
+  org_role          TEXT,
+  joined_at         TEXT,
+  left_at           TEXT NOT NULL,
+  recorded_by       TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_contact_org_history_contact ON contact_org_history(contact_id, left_at);
+
+-- Indexes for the busiest queries.
+CREATE INDEX IF NOT EXISTS idx_posts_events ON posts(customer_id, status, event_starts_at);
+CREATE INDEX IF NOT EXISTS idx_users_email_lower ON users(lower(email));
+CREATE INDEX IF NOT EXISTS idx_orgs_name_norm ON organizations(customer_id, lower(trim(name)));

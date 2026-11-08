@@ -184,7 +184,7 @@ export function GroupsPage() {
       </div>
       {group.description && <p className="mt-1 line-clamp-3 text-sm text-slate-600">{group.description}</p>}
       <p className="mt-2 text-xs text-slate-500">
-        {group.memberCount} {group.memberCount === 1 ? 'member' : 'members'} · {group.postCount} {group.postCount === 1 ? 'post' : 'posts'}
+        {group.memberCount} {group.memberCount === 1 ? 'member' : 'members'} · {group.postCount} {group.postCount === 1 ? 'event' : 'events'}
         {group.canModerate && group.pendingCount > 0 && (
           <span className="ml-1 font-semibold text-amber-700">· {group.pendingCount} waiting</span>
         )}
@@ -201,7 +201,7 @@ export function GroupsPage() {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-navy-800">Groups</h1>
-          <p className="mt-1 text-sm text-slate-500">Join groups around the topics you care about and see posts shared just with them.</p>
+          <p className="mt-1 text-sm text-slate-500">Join groups around the topics you care about and see events shared just with them.</p>
         </div>
         {data?.canCreate && (
           <button type="button" className="btn-primary" onClick={() => setCreating(true)}>New group</button>
@@ -395,7 +395,7 @@ function GroupFeed({ group, refreshKey }: { group: CommunityGroup; refreshKey: n
     setPosts((current) => current.map((p) => (p.id === id ? { ...p, ...change } : p)));
   return (
     <div className="space-y-4">
-      {posts.length === 0 && <EmptyState title="No posts yet" message="Posts shared with this group will appear here." icon="▤" />}
+      {posts.length === 0 && <EmptyState title="No events yet" message="Events shared with this group will appear here." icon="▤" />}
       {posts.map((post) => (
         <PostCard key={post.id} post={post} onChange={patch(post.id)} />
       ))}
@@ -490,7 +490,7 @@ export function GroupDetailPage() {
           onClick={() => setComposing(true)}
           className="card flex min-h-[52px] w-full items-center px-4 text-left text-sm text-slate-500 hover:bg-slate-50"
         >
-          Share something with {group.name}...
+          Add an event for {group.name}...
         </button>
       )}
 
@@ -504,7 +504,7 @@ export function GroupDetailPage() {
             onClick={() => setTab(value)}
             className={`min-h-[40px] flex-1 rounded-md text-sm font-semibold ${tab === value ? 'bg-white text-navy-800 shadow-card' : 'text-slate-600'}`}
           >
-            {value === 'posts' ? 'Posts' : `Members${group.canModerate && group.pendingCount ? ` (${group.pendingCount} waiting)` : ''}`}
+            {value === 'posts' ? 'Events' : `Members${group.canModerate && group.pendingCount ? ` (${group.pendingCount} waiting)` : ''}`}
           </button>
         ))}
       </div>

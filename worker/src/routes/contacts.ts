@@ -136,6 +136,21 @@ function buildFilters(customerId: string, query: URLSearchParams) {
   return { clause: where.join(' AND '), params };
 }
 
+function orgHistoryWrite(
+  ctx: Ctx,
+  customerId: string,
+  contactId: string,
+  row: { organization_id: string; org_role: string | null; created_at: string; name: string },
+  leftAt: string,
+): { sql: string; params: SqlParam[] } {
+  return {
+    sql: `INSERT INTO contact_org_history
+            (id, customer_id, contact_id, organization_id, organization_name, org_role, joined_at, left_at, recorded_by)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    params: [newId(), customerId, contactId, row.organization_id, row.name, row.org_role, row.created_at, leftAt, ctx.auth?.userId ?? null],
+  };
+}
+
 export function register(router: Router): void {
   router.get('/api/contacts', async (ctx: Ctx) => {
     const { customerId } = requireStaff(ctx);
@@ -332,6 +347,79 @@ export function register(router: Router): void {
     return jsonResponse({ contact: contactOut(row!) });
   });
 
+  /** Previous organizations, most recent first. */
+  router.get('/api/contacts/:id/past-organizations', async (ctx: Ctx) => {
+    const { customerId } = requireStaff(ctx);
+    const rows = await ctx.db.all<Record<string, unknown>>(
+      `SELECT h.id, h.organization_name, h.org_role, h.joined_at, h.left_at, o.id AS live_org_id
+         FROM contact_org_history h
+         LEFT JOIN organizations o ON o.id = h.organization_id AND o.deleted_at IS NULL
+        WHERE h.contact_id = ? AND h.customer_id = ?
+        ORDER BY h.left_at DESC, h.id DESC`,
+      [ctx.params.id!, customerId],
+    );
+    return jsonResponse({
+      organizations: rows.map((row) => ({
+        id: String(row.id),
+        name: String(row.organization_name),
+        role: row.org_role ? String(row.org_role) : null,
+        joinedAt: row.joined_at ? String(row.joined_at) : null,
+        leftAt: String(row.left_at),
+        organizationId: row.live_org_id ? String(row.live_org_id) : null,
+      })),
+    });
+  });
+
+  /** Marks a contact as having left one organization; it moves to Previous organizations. */
+  router.post('/api/contacts/:id/leave-organization', async (ctx: Ctx) => {
+    const { customerId, userId } = requireEditor(ctx);
+    const body = await readJson(ctx.req);
+    const organizationId = optionalId(body.organizationId, 'Organization');
+    const contact = await ctx.db.get<{ id: string; organization_id: string | null }>(
+      `SELECT id, organization_id FROM contacts WHERE id = ? AND customer_id = ? AND deleted_at IS NULL`,
+      [ctx.params.id!, customerId],
+    );
+    if (!contact) throw notFound('That contact no longer exists.');
+    const memberships = await ctx.db.all<{ organization_id: string; org_role: string | null; created_at: string; name: string }>(
+      `SELECT co.organization_id, co.org_role, co.created_at, o.name
+         FROM contact_organizations co JOIN organizations o ON o.id = co.organization_id
+        WHERE co.contact_id = ?
+        ORDER BY co.created_at ASC`,
+      [contact.id],
+    );
+    const leaving = memberships.find((row) => row.organization_id === organizationId);
+    if (!leaving) throw badRequest('This contact is not part of that organization.', 'Organization');
+    const remaining = memberships.filter((row) => row.organization_id !== organizationId);
+    // If they left their main organization, the next one takes over as main.
+    const primary = contact.organization_id === organizationId ? remaining[0] ?? null : undefined;
+    const timestamp = nowIso();
+    await ctx.db.batch([
+      orgHistoryWrite(ctx, customerId, contact.id, leaving, timestamp),
+      { sql: `DELETE FROM contact_organizations WHERE contact_id = ? AND organization_id = ?`, params: [contact.id, leaving.organization_id] },
+      ...(primary === undefined
+        ? []
+        : [
+            {
+              sql: `UPDATE contacts SET organization_id = ?, org_role = ?, updated_at = ?, last_edited_by = ? WHERE id = ?`,
+              params: [primary?.organization_id ?? null, primary?.org_role ?? null, timestamp, userId, contact.id] as SqlParam[],
+            },
+          ]),
+    ]);
+    const row = await ctx.db.get(`${SELECT_CONTACT} WHERE c.id = ?`, [contact.id]);
+    return jsonResponse({ contact: contactOut(row!) });
+  });
+
+  /** Removes a mistaken entry from Previous organizations. */
+  router.delete('/api/contacts/:id/past-organizations/:historyId', async (ctx: Ctx) => {
+    const { customerId } = requireEditor(ctx);
+    await ctx.db.run(`DELETE FROM contact_org_history WHERE id = ? AND contact_id = ? AND customer_id = ?`, [
+      ctx.params.historyId!,
+      ctx.params.id!,
+      customerId,
+    ]);
+    return jsonResponse({ ok: true });
+  });
+
   /** Adds and/or removes tags across many contacts in one request. */
   router.post('/api/contacts/bulk-tags', async (ctx: Ctx) => {
     const { customerId, userId } = requireEditor(ctx);
@@ -492,13 +580,14 @@ async function parseContact(
     );
     if (!org) throw badRequest('That organization was not found.', 'Organization');
   }
+  const newOrganizationNames = parseNewOrganizationNames(body.newOrganizationNames);
 
   // "Student Founder" is a business relationship, not a student record: the schema
   // deliberately has no student fields (no ID, major, class year, advisor), so a
   // founder is stored the same way any other business contact is.
   const isStudentFounder = flag(body.isStudentFounder) === 1 || tags.includes('Student Founder');
 
-  return {
+  const fields = {
     firstName: requiredString(body.firstName, 'First name', { max: 100 }),
     lastName: requiredString(body.lastName, 'Last name', { max: 100 }),
     email: requiredEmail(body.email),
@@ -514,6 +603,40 @@ async function parseContact(
     status: oneOf(body.status, 'Status', CONTACT_STATUSES, 'active'),
     isStudentFounder: isStudentFounder ? 1 : 0,
   };
+
+  // Only once everything above is valid, so a rejected form leaves no stray organizations.
+  for (const name of newOrganizationNames) {
+    const id = await findOrCreateOrganization(ctx, customerId, name);
+    if (!fields.organizationIds.includes(id)) fields.organizationIds.push(id);
+  }
+  fields.organizationId = fields.organizationIds[0] ?? null;
+  return fields;
+}
+
+function parseNewOrganizationNames(value: unknown): string[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) throw badRequest('Organizations must be a list.', 'Organization');
+  if (value.length > 10) throw badRequest('Add up to 10 new organizations at a time.', 'Organization');
+  const names = value.map((raw) => requiredString(raw, 'Organization name', { max: 200 }));
+  return [...new Map(names.map((name) => [name.toLowerCase(), name])).values()];
+}
+
+/** An organization typed into a contact joins the Organizations page, unless it is already there. */
+async function findOrCreateOrganization(ctx: Ctx, customerId: string, name: string): Promise<string> {
+  const existing = await ctx.db.get<{ id: string }>(
+    `SELECT id FROM organizations WHERE customer_id = ? AND lower(trim(name)) = ? AND deleted_at IS NULL`,
+    [customerId, name.trim().toLowerCase()],
+  );
+  if (existing) return existing.id;
+  const id = newId();
+  const timestamp = nowIso();
+  const userId = ctx.auth?.userId ?? null;
+  await ctx.db.run(
+    `INSERT INTO organizations (id, customer_id, name, org_type, status, created_at, updated_at, created_by, last_edited_by)
+     VALUES (?, ?, ?, 'other', 'active', ?, ?, ?, ?)`,
+    [id, customerId, name, timestamp, timestamp, userId, userId],
+  );
+  return id;
 }
 
 /**
@@ -525,10 +648,19 @@ async function syncContactOrganizations(
   ctx: Ctx,
   input: { customerId: string; contactId: string; organizationIds: string[]; orgRole: string | null },
 ): Promise<void> {
+  const timestamp = nowIso();
+  const current = await ctx.db.all<{ organization_id: string; org_role: string | null; created_at: string; name: string }>(
+    `SELECT co.organization_id, co.org_role, co.created_at, o.name
+       FROM contact_organizations co JOIN organizations o ON o.id = co.organization_id
+      WHERE co.contact_id = ?`,
+    [input.contactId],
+  );
+  // Anyone taken off an organization keeps it under "Previous organizations".
+  const departed = current.filter((row) => !input.organizationIds.includes(row.organization_id));
   const writes: { sql: string; params: SqlParam[] }[] = [
+    ...departed.map((row) => orgHistoryWrite(ctx, input.customerId, input.contactId, row, timestamp)),
     { sql: `DELETE FROM contact_organizations WHERE contact_id = ?`, params: [input.contactId] },
   ];
-  const timestamp = nowIso();
   input.organizationIds.forEach((organizationId, index) => {
     writes.push({
       sql: `INSERT INTO contact_organizations (id, customer_id, contact_id, organization_id, org_role, created_at)

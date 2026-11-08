@@ -173,7 +173,17 @@ export function SignupPage() {
     setBusy(true);
     setError(null);
     try {
-      const base = skipDetails ? { ...draftFrom(null), firstName: draft.firstName, lastName: draft.lastName } : draft;
+      // Skipping leaves out the optional details; a student's year and school are still required.
+      const base = skipDetails
+        ? {
+            ...draftFrom(null),
+            firstName: draft.firstName,
+            lastName: draft.lastName,
+            graduationYear: draft.graduationYear,
+            schoolType: draft.schoolType,
+            schoolName: draft.schoolName,
+          }
+        : draft;
       await api.put('/community/profile', payloadFrom(base, role));
       if (!announcements) await api.put('/community/profile/notifications', { announcements: false });
       const done = await api.post<{ community: CommunityState }>('/community/onboarding/complete');
@@ -302,7 +312,9 @@ export function SignupPage() {
           <div>
             <h2 className="text-2xl font-bold text-navy-800">About you</h2>
             <p className="mt-1 text-sm text-slate-500">
-              Everything on this step is optional. You can skip it and edit your profile any time.
+              {role === 'student'
+                ? 'We need your graduation year and school to finish. The rest is optional, and you can edit your profile any time.'
+                : 'Everything on this step is optional. You can skip it and edit your profile any time.'}
             </p>
           </div>
 
@@ -327,12 +339,12 @@ export function SignupPage() {
           {community && <ResumeUpload community={community} onUpdated={setCommunity} />}
 
           <Checkbox
-            label="Email me about new ECenter posts and events (you can turn this off any time)"
+            label="Email me about new ECenter events (you can turn this off any time)"
             checked={announcements}
             onChange={setAnnouncements}
           />
 
-          {error && !['Bio', 'LinkedIn URL', 'Scheduling link', 'Graduation year', 'Major', 'Role', 'Company', 'Interests', 'Help topics'].includes(error.field ?? '') && (
+          {error && !['Bio', 'LinkedIn URL', 'Scheduling link', 'Graduation year', 'School', 'School name', 'Major', 'Role', 'Company', 'Interests', 'Help topics'].includes(error.field ?? '') && (
             <p className="rounded-lg bg-red-50 px-3 py-2 text-sm font-semibold text-urgent" role="alert">
               {error.message}
             </p>
@@ -343,7 +355,7 @@ export function SignupPage() {
               Back
             </button>
             <button type="button" className="btn-quiet sm:ml-auto" onClick={() => finish(true)} disabled={busy}>
-              Skip for now
+              {role === 'student' ? 'Skip the optional details' : 'Skip for now'}
             </button>
             <button type="submit" className="btn-primary" disabled={busy}>
               {busy ? 'Saving...' : 'Create account'}

@@ -1,13 +1,7 @@
 import type { Db } from '../db/driver.ts';
 import { audit } from '../lib/audit.ts';
 import { consumeToken, findUsedToken, issueToken } from '../lib/authTokens.ts';
-import {
-  normaliseEmail,
-  optionalGraduationYear,
-  optionalLinkedInUrl,
-  optionalSchedulingUrl,
-  password as passwordField,
-} from '../lib/communityValidate.ts';
+import { normaliseEmail, optionalGraduationYear, optionalLinkedInUrl, optionalSchedulingUrl, password as passwordField, SCHOOL_TYPES } from '../lib/communityValidate.ts';
 import { badRequest, clientIp, conflict, forbidden, isUniqueViolation, jsonResponse, notFound, readJson } from '../lib/http.ts';
 import { newId } from '../lib/ids.ts';
 import { actionEmail, appBaseUrl, sendMail } from '../lib/mailer.ts';
@@ -56,7 +50,7 @@ export async function ownCommunityState(ctx: Ctx, userId: string) {
             ca.post_permission, ca.group_permission, ca.notify_messages, ca.notify_mentions, ca.notify_announcements,
             u.email, u.email_verified_at, u.role,
             p.first_name, p.last_name, p.bio, p.linkedin_url, p.photo_key, p.major, p.graduation_year,
-            p.role_title, p.company, p.scheduling_url,
+            p.school_type, p.school_name, p.role_title, p.company, p.scheduling_url,
             (SELECT t.email FROM auth_tokens t
               WHERE t.user_id = u.id AND t.purpose = 'change_email' AND t.used_at IS NULL AND t.expires_at > ?
               ORDER BY t.created_at DESC LIMIT 1) AS pending_email
@@ -84,6 +78,8 @@ export async function ownCommunityState(ctx: Ctx, userId: string) {
       photoUrl: await photoUrl(ctx, userId, row.photo_key),
       major: row.major ? String(row.major) : null,
       graduationYear: row.graduation_year ? Number(row.graduation_year) : null,
+      schoolType: row.school_type ? String(row.school_type) : null,
+      schoolName: row.school_name ? String(row.school_name) : null,
       roleTitle: row.role_title ? String(row.role_title) : null,
       company: row.company ? String(row.company) : null,
       schedulingUrl: row.scheduling_url ? String(row.scheduling_url) : null,
@@ -499,6 +495,17 @@ export function register(router: Router): void {
     const isStudent = accountType === 'student';
     const major = isStudent ? optionalString(body.major, 'Major', { max: 100 }) : null;
     const graduationYear = isStudent ? optionalGraduationYear(body.graduationYear) : null;
+    const schoolType = isStudent && body.schoolType ? oneOf(body.schoolType, 'School', SCHOOL_TYPES) : null;
+    const schoolName = schoolType === 'other' ? optionalString(body.schoolName, 'School name', { max: 120 }) : null;
+    if (isStudent) {
+      // Required to finish signup, so a completed student profile cannot be emptied again.
+      const current = await ctx.db.get<{ graduation_year: number | null; school_type: string | null }>(
+        `SELECT graduation_year, school_type FROM community_profiles WHERE user_id = ?`,
+        [auth.userId],
+      );
+      if (current?.graduation_year && !graduationYear) throw badRequest('Enter your graduation year.', 'Graduation year');
+      if (current?.school_type && !schoolType) throw badRequest('Choose the school you attend.', 'School');
+    }
     const roleTitle = !isStudent ? optionalString(body.roleTitle, 'Role', { max: 100 }) : null;
     const company = !isStudent ? optionalString(body.company, 'Company', { max: 120 }) : null;
     const schedulingUrl = accountType === 'mentor' ? optionalSchedulingUrl(body.schedulingUrl) : null;
@@ -512,9 +519,10 @@ export function register(router: Router): void {
       {
         sql: `UPDATE community_profiles SET
                 first_name = ?, last_name = ?, bio = ?, linkedin_url = ?, major = ?, graduation_year = ?,
+                school_type = ?, school_name = ?,
                 role_title = ?, company = ?, scheduling_url = ?, updated_at = ?
               WHERE user_id = ?`,
-        params: [firstName, lastName, bio, linkedinUrl, major, graduationYear, roleTitle, company, schedulingUrl, timestamp, auth.userId],
+        params: [firstName, lastName, bio, linkedinUrl, major, graduationYear, schoolType, schoolName, roleTitle, company, schedulingUrl, timestamp, auth.userId],
       },
       {
         sql: `UPDATE community_accounts SET account_type = ?, updated_at = ? WHERE user_id = ?`,
@@ -534,7 +542,15 @@ export function register(router: Router): void {
 
   /** "Create account" / "Skip for now" on step 2. Activation also needs a verified email. */
   router.post('/api/community/onboarding/complete', async (ctx: Ctx) => {
-    const { auth } = await requireOwnCommunityAccount(ctx);
+    const { auth, account } = await requireOwnCommunityAccount(ctx);
+    if (account.account_type === 'student') {
+      const profile = await ctx.db.get<{ graduation_year: number | null; school_type: string | null }>(
+        `SELECT graduation_year, school_type FROM community_profiles WHERE user_id = ?`,
+        [auth.userId],
+      );
+      if (!profile?.graduation_year) throw badRequest('Enter your graduation year to finish signing up.', 'Graduation year');
+      if (!profile.school_type) throw badRequest('Choose the school you attend to finish signing up.', 'School');
+    }
     const timestamp = nowIso();
     await ctx.db.run(
       `UPDATE community_accounts SET onboarding_completed_at = COALESCE(onboarding_completed_at, ?), updated_at = ?

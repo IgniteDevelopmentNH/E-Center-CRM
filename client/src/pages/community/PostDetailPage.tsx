@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { RichText } from '../../components/mentions.tsx';
 import { CommentsSection, DateBadge, LikeButton, MemberPostEditor, PostAuthor, PostBadges, RsvpButton, eventWhen } from '../../components/posts.tsx';
+import { Age21Badge, EventIconRow } from '../../components/eventOptions.tsx';
 import { ErrorBlock, LoadingBlock } from '../../components/ui.tsx';
 import { ApiError, api } from '../../lib/api.ts';
 import { useApi, useCommunityBase } from '../../lib/hooks.ts';
@@ -54,7 +55,7 @@ export function PostDetailPage() {
   const isMine = !!community && post.author.kind === 'member' && post.author.id === community.userId;
 
   async function remove() {
-    if (!post || !window.confirm('Take this post down? It will disappear from the feed.')) return;
+    if (!post || !window.confirm('Take this down? It will disappear from the feed.')) return;
     try {
       await api.delete(`/community/posts/${post.id}`);
       toast.success('Post removed.');
@@ -112,14 +113,20 @@ export function PostDetailPage() {
                 {post.event.location && <p className="text-sm text-slate-600">{post.event.location}</p>}
               </div>
             </div>
+            <EventIconRow icons={post.event.icons} />
+            {post.event.age21 && !post.event.rsvpEnabled && <Age21Badge />}
             {post.event.rsvpEnabled && post.status === 'published' && (
               <RsvpButton
                 target="post"
                 id={post.id}
+                title={post.title}
                 going={post.event.going}
                 count={post.event.rsvpCount}
                 age21={post.event.age21}
+                guestRsvp={post.event.guestRsvp}
+                questions={post.event.questions}
                 showAttendees={post.event.attendeesPublic || post.canEdit}
+                showResponses={post.canEdit}
                 onChange={(state) => patch({ event: { ...post.event!, going: state.going, rsvpCount: state.rsvpCount } })}
               />
             )}

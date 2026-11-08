@@ -19,7 +19,7 @@ import {
 import { ApiError, api, openDocument } from '../lib/api.ts';
 import { displayTag, dueLabel, formatBytes, formatDate, formatDateTime, formatRelative, humanise } from '../lib/format.ts';
 import { useApi } from '../lib/hooks.ts';
-import type { Contact, CrmDocument, Note, Task } from '../lib/types.ts';
+import type { Contact, CrmDocument, Note, PastOrganization, Task } from '../lib/types.ts';
 import { useAuth } from '../state/AuthContext.tsx';
 import { useToast } from '../state/ToastContext.tsx';
 
@@ -39,6 +39,28 @@ export function ContactPanel({
   const notes = useApi<{ notes: Note[] }>(`/notes?contactId=${contactId}&limit=100`);
   const tasks = useApi<{ tasks: Task[] }>(`/tasks?contactId=${contactId}&limit=100`);
   const documents = useApi<{ documents: CrmDocument[] }>(`/documents?contactId=${contactId}`);
+  const pastOrganizations = useApi<{ organizations: PastOrganization[] }>(`/contacts/${contactId}/past-organizations`, [data?.contact.updatedAt]);
+
+  async function leaveOrganization(organizationId: string, name: string) {
+    if (!window.confirm(`Mark this person as having left ${name}? It moves to their previous organizations.`)) return;
+    try {
+      await api.post(`/contacts/${contactId}/leave-organization`, { organizationId });
+      reload();
+      pastOrganizations.reload();
+    } catch (caught) {
+      toast.error(caught instanceof ApiError ? caught.message : 'That did not work.');
+    }
+  }
+
+  async function removePastOrganization(historyId: string) {
+    if (!window.confirm('Remove this from their previous organizations?')) return;
+    try {
+      await api.delete(`/contacts/${contactId}/past-organizations/${historyId}`);
+      pastOrganizations.reload();
+    } catch (caught) {
+      toast.error(caught instanceof ApiError ? caught.message : 'That did not work.');
+    }
+  }
 
   const [editing, setEditing] = useState(false);
   const [addingNote, setAddingNote] = useState(false);
@@ -278,6 +300,11 @@ export function ContactPanel({
                             {org.name}
                           </Link>
                           {org.role && <span className="text-slate-400"> — {org.role}</span>}
+                          {canEdit && (
+                            <button type="button" className="btn-quiet ml-1 min-h-0 py-0 text-xs" onClick={() => leaveOrganization(org.id, org.name)}>
+                              Left
+                            </button>
+                          )}
                         </li>
                       ))}
                     </ul>
@@ -286,6 +313,33 @@ export function ContactPanel({
                   )}
                 </dd>
               </div>
+              {!!pastOrganizations.data?.organizations.length && (
+                <div className="sm:col-span-2">
+                  <dt className="text-xs font-semibold uppercase tracking-wide text-slate-400">Previous organizations</dt>
+                  <dd>
+                    <ul className="space-y-0.5">
+                      {pastOrganizations.data.organizations.map((org) => (
+                        <li key={org.id} className="text-slate-600">
+                          {org.organizationId ? (
+                            <Link to={`/admin/organizations?open=${org.organizationId}`} className="text-teal-700 hover:underline" onClick={onClose}>
+                              {org.name}
+                            </Link>
+                          ) : (
+                            org.name
+                          )}
+                          {org.role && <span className="text-slate-400"> — {org.role}</span>}
+                          <span className="text-xs text-slate-400"> · left {formatDate(org.leftAt)}</span>
+                          {canEdit && (
+                            <button type="button" className="btn-quiet ml-1 min-h-0 py-0 text-xs" onClick={() => removePastOrganization(org.id)} aria-label={`Remove ${org.name} from previous organizations`}>
+                              Remove
+                            </button>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </dd>
+                </div>
+              )}
               <div>
                 <dt className="text-xs font-semibold uppercase tracking-wide text-slate-400">Status</dt>
                 <dd className="mt-0.5">

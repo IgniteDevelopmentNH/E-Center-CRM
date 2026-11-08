@@ -63,6 +63,11 @@ let ipCounter = 0;
 async function api(method: string, routePath: string, body?: unknown, authToken: string | null = ownerToken) {
   const headers: Record<string, string> = { 'CF-Connecting-IP': `10.1.0.${(ipCounter++ % 250) + 1}` };
   if (authToken) headers.Authorization = `Bearer ${authToken}`;
+  // The feed is events only, so tests about something else still give their posts a date.
+  if (/^\/api\/(admin|community)\/posts(\/[^/]+)?$/.test(routePath) && (method === 'POST' || method === 'PUT') && body && !(body instanceof FormData)) {
+    const fields = body as Record<string, unknown>;
+    if (fields.isEvent === undefined) body = { ...fields, isEvent: true, eventStartsAt: fields.eventStartsAt ?? new Date(Date.now() + 14 * 86400000).toISOString() };
+  }
   let payload: BodyInit | undefined;
   if (body instanceof FormData) payload = body;
   else if (body !== undefined) {
@@ -104,7 +109,7 @@ async function createMember(accountType: 'student' | 'mentor', first: string, la
   const message = [...outbox].reverse().find((m) => m.to === email && m.text.includes('/verify-email?'))!;
   const token = /token=([a-f0-9]+)/.exec(message.text)![1]!;
   assert.equal((await api('POST', '/api/auth/verify-email', { token }, null)).status, 200);
-  assert.equal((await api('PUT', '/api/community/profile', { firstName: first, lastName: last, ...profile }, created.body.token)).status, 200);
+  assert.equal((await api('PUT', '/api/community/profile', { firstName: first, lastName: last, ...(accountType === 'student' ? { graduationYear: 2028, schoolType: 'unh' } : {}), ...profile }, created.body.token)).status, 200);
   const done = await api('POST', '/api/community/onboarding/complete', undefined, created.body.token);
   assert.equal(done.body.community.status, 'active');
   return { token: created.body.token, userId: created.body.user.id, email };
@@ -115,6 +120,11 @@ const mention = (m: Member, name: string) => `@[${name}](user:${m.userId})`;
 let student: Member;
 let mentor: Member;
 let other: Member;
+
+/** The event posts in a feed response. */
+function feedPosts(feed: { body: any }): any[] {
+  return feed.body.items.filter((item: any) => item.kind === 'post').map((item: any) => item.post);
+}
 
 before(async () => {
   const here = path.dirname(fileURLToPath(import.meta.url));
@@ -157,7 +167,7 @@ describe('posting permissions and approval', () => {
     const id = created.body.post.id;
 
     const feed = await api('GET', '/api/community/feed', undefined, other.token);
-    assert.ok(!feed.body.posts.some((p: any) => p.id === id));
+    assert.ok(!feedPosts(feed).some((p: any) => p.id === id));
     assert.equal((await api('GET', `/api/community/posts/${id}`, undefined, other.token)).status, 404);
     assert.equal((await api('GET', `/api/community/posts/${id}`, undefined, mentor.token)).status, 200, 'author can see it');
 
@@ -171,7 +181,7 @@ describe('posting permissions and approval', () => {
     assert.equal(approved.body.post.status, 'published');
 
     const after = await api('GET', '/api/community/feed', undefined, other.token);
-    const live = after.body.posts.find((p: any) => p.id === id);
+    const live = feedPosts(after).find((p: any) => p.id === id);
     assert.ok(live);
     assert.equal(live.author.name, 'Manny Mentor');
     assert.equal(live.author.id, mentor.userId);
@@ -230,7 +240,7 @@ describe('posting permissions and approval', () => {
     assert.equal((await api('DELETE', `/api/community/posts/${id}`, undefined, other.token)).status, 403);
     assert.equal((await api('DELETE', `/api/community/posts/${id}`, undefined, mentor.token)).status, 200);
     const feed = await api('GET', '/api/community/feed', undefined, other.token);
-    assert.ok(!feed.body.posts.some((p: any) => p.id === id));
+    assert.ok(!feedPosts(feed).some((p: any) => p.id === id));
 
     const history = await api('GET', '/api/admin/posts/history', undefined, viewerToken);
     const removal = history.body.revisions.find((r: any) => r.postId === id && r.action === 'delete');
@@ -239,7 +249,7 @@ describe('posting permissions and approval', () => {
 
     assert.equal((await api('POST', `/api/admin/posts/${id}/restore`, undefined, editorToken)).status, 200);
     const restored = await api('GET', '/api/community/feed', undefined, other.token);
-    assert.ok(restored.body.posts.some((p: any) => p.id === id));
+    assert.ok(feedPosts(restored).some((p: any) => p.id === id));
   });
 });
 
@@ -452,7 +462,7 @@ describe('profiles and topics', () => {
     assert.equal(tags.filter((t: any) => t.featured).length, 14);
     assert.ok(tags.filter((t: any) => !t.featured).length >= 20);
     assert.ok(tags.some((t: any) => t.slug === 'artificial-intelligence' && !t.featured));
-    const saved = await api('PUT', '/api/community/profile', { firstName: 'Stella', lastName: 'Student', interests: ['artificial-intelligence', 'marketing'] }, student.token);
+    const saved = await api('PUT', '/api/community/profile', { firstName: 'Stella', lastName: 'Student', graduationYear: 2028, schoolType: 'unh', interests: ['artificial-intelligence', 'marketing'] }, student.token);
     assert.equal(saved.status, 200);
   });
 });

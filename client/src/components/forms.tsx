@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
-import { EventOptionFields, GuestVisibilityField } from './eventOptions.tsx';
+import { EventOptionsFields, GuestVisibilityField, eventOptionsFrom, questionsPayload } from './eventOptions.tsx';
 import { ApiError, api } from '../lib/api.ts';
 import { DEFAULT_EVENT_LOCATION, SYSTEM_TAG_CREATED_ACCOUNT } from '../lib/constants.ts';
 import {
@@ -124,6 +124,7 @@ export function ContactForm({
     }
     return fromContact;
   });
+  const [newOrganizationNames, setNewOrganizationNames] = useState<string[]>([]);
   const [orgRole, setOrgRole] = useState(initial?.orgRole ?? '');
   const [status, setStatus] = useState(initial?.status ?? 'active');
 
@@ -147,6 +148,7 @@ export function ContactForm({
               howWeConnected,
               tags,
               organizationIds,
+              newOrganizationNames,
               orgRole,
               status,
             };
@@ -228,7 +230,7 @@ export function ContactForm({
 
       <Field
         label="Organizations"
-        hint="Check every organization this person belongs to. Search to narrow the list."
+        hint="Check every organization this person belongs to. Search to narrow the list, or type a new name to add it. Unchecking one moves it to their previous organizations."
         error={errorFor('Organization')}
       >
         <SearchableChecklist
@@ -239,12 +241,30 @@ export function ContactForm({
           }))}
           selected={organizationIds}
           onChange={setOrganizationIds}
-          placeholder="Search organizations"
+          placeholder="Search or add an organization"
           emptyText="No organizations match that."
+          onCreate={(name) =>
+            setNewOrganizationNames((names) =>
+              names.some((n) => n.toLowerCase() === name.toLowerCase()) ? names : [...names, name],
+            )
+          }
+          createLabel={(name) => `Add “${name}” as a new organization`}
         />
+        {newOrganizationNames.length > 0 && (
+          <ul className="mt-2 flex flex-wrap gap-1.5">
+            {newOrganizationNames.map((name) => (
+              <li key={name} className="chip bg-teal-50 text-teal-800">
+                New: {name}
+                <button type="button" aria-label={`Remove ${name}`} onClick={() => setNewOrganizationNames((names) => names.filter((n) => n !== name))}>
+                  ×
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
       </Field>
 
-      {organizationIds.length > 0 && (
+      {organizationIds.length + newOrganizationNames.length > 0 && (
         <Field
           label="Role there"
           hint="Applies to their main organization (the first one selected)."
@@ -730,9 +750,16 @@ export function EventForm({
   const [followupNotes, setFollowupNotes] = useState(initial?.followupNotes ?? '');
   const [communityVisible, setCommunityVisible] = useState(initial?.communityVisible ?? false);
   const [communityDetails, setCommunityDetails] = useState(initial?.communityDetails ?? '');
-  const [communityRsvp, setCommunityRsvp] = useState(initial?.communityRsvp ?? false);
-  const [communityAge21, setCommunityAge21] = useState(initial?.communityAge21 ?? false);
-  const [communityRsvpPublic, setCommunityRsvpPublic] = useState(initial?.communityRsvpPublic ?? false);
+  const [options, setOptions] = useState(() =>
+    eventOptionsFrom({
+      rsvpEnabled: initial?.communityRsvp ?? false,
+      guestRsvp: initial?.communityRsvpGuests ?? false,
+      age21: initial?.communityAge21 ?? false,
+      attendeesPublic: initial?.communityRsvpPublic ?? false,
+      icons: initial?.communityIcons ?? [],
+      questions: initial?.communityQuestions ?? [],
+    }),
+  );
   const [communityGuestVisible, setCommunityGuestVisible] = useState(initial?.communityGuestVisible ?? true);
   const [contactIds, setContactIds] = useState<string[]>([]);
 
@@ -756,10 +783,13 @@ export function EventForm({
               followupNotes,
               communityVisible,
               communityDetails: communityVisible ? communityDetails : null,
-              communityRsvp: communityVisible && communityRsvp,
-              communityAge21: communityVisible && communityAge21,
-              communityRsvpPublic: communityVisible && communityRsvp && communityRsvpPublic,
+              communityRsvp: communityVisible && options.rsvpMode !== 'off',
+              communityRsvpGuests: communityVisible && options.rsvpMode === 'everyone',
+              communityAge21: communityVisible && options.age21,
+              communityRsvpPublic: communityVisible && options.attendeesPublic,
               communityGuestVisible,
+              communityIcons: options.icons,
+              communityQuestions: questionsPayload(options.questions),
               ...(initial ? {} : { contactIds }),
             };
             const response = initial
@@ -832,15 +862,8 @@ export function EventForm({
             <Field label="Description for the community" hint="Optional. Shown on the event's page in the portal." error={errorFor('Community description')}>
               <TextArea value={communityDetails} onChange={(event) => setCommunityDetails(event.target.value)} rows={3} />
             </Field>
-            <Checkbox label={'Let members say "I\'ll be there!"'} checked={communityRsvp} onChange={setCommunityRsvp} />
-            <EventOptionFields
-              rsvpEnabled={communityRsvp}
-              age21={communityAge21}
-              onAge21={setCommunityAge21}
-              attendeesPublic={communityRsvpPublic}
-              onAttendeesPublic={setCommunityRsvpPublic}
-            />
             <GuestVisibilityField value={communityGuestVisible} onChange={setCommunityGuestVisible} />
+            <EventOptionsFields value={options} onChange={setOptions} guestVisible={communityGuestVisible} errorFor={errorFor} />
           </div>
         )}
       </div>

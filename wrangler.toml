@@ -83,6 +83,11 @@ name = "EMAIL"
 [triggers]
 crons = ["* * * * *"]
 
+# Runs the Worker close to the database, since a request makes several queries.
+# Static files are unaffected and still come from the nearest edge location.
+[placement]
+mode = "smart"
+
 [observability]
 enabled = true
 

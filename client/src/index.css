@@ -3,6 +3,28 @@
 @tailwind utilities;
 
 @layer base {
+  /* UNH blue: the community portal, and sign-in. */
+  :root {
+    --navy-50: 238 243 249;
+    --navy-100: 214 226 239;
+    --navy-200: 169 194 219;
+    --navy-600: 0 67 127;
+    --navy-700: 0 51 102;
+    --navy-800: 0 40 80;
+    --navy-900: 0 28 57;
+  }
+
+  /* Granite: the admin CRM, so staff can tell at a glance which side they are on. */
+  .theme-crm {
+    --navy-50: 240 241 243;
+    --navy-100: 222 225 229;
+    --navy-200: 185 190 197;
+    --navy-600: 74 81 90;
+    --navy-700: 51 56 62;
+    --navy-800: 38 42 47;
+    --navy-900: 25 28 32;
+  }
+
   html {
     -webkit-text-size-adjust: 100%;
   }

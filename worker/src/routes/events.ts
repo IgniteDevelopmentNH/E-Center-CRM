@@ -14,6 +14,7 @@ import {
 import { requireStaff, requireEditor } from '../middleware/auth.ts';
 import { EVENT_TYPES, contactOut, eventOut } from '../records.ts';
 import type { Ctx, Router } from '../router.ts';
+import { parseIcons, parseQuestions, rsvpCountSql } from '../services/eventOptions.ts';
 import { enqueueAnnouncement } from '../services/notifications.ts';
 import { createSystemNote } from './notes.ts';
 
@@ -21,7 +22,7 @@ const SELECT_EVENT = `
   SELECT e.*,
          m.external_id,
          (SELECT COUNT(*) FROM event_attendees a WHERE a.event_id = e.id) AS attendee_count,
-         (SELECT COUNT(*) FROM event_rsvps r WHERE r.target_type = 'event' AND r.target_id = e.id) AS community_rsvp_count
+         ${rsvpCountSql('event', 'e.id')} AS community_rsvp_count
     FROM events e
     LEFT JOIN event_external_mapping m ON m.event_id = e.id`;
 
@@ -29,6 +30,7 @@ function parseEvent(body: Record<string, unknown>) {
   const startsAt = requiredTimestamp(body.startsAt, 'Event date');
   const endsAt = optionalTimestamp(body.endsAt, 'End time');
   if (endsAt && endsAt < startsAt) throw badRequest('The end time is before the start time.', 'End time');
+  const guestVisible = body.communityGuestVisible === false ? 0 : 1;
   return {
     name: requiredString(body.name, 'Event name', { max: 200 }),
     startsAt,
@@ -45,7 +47,10 @@ function parseEvent(body: Record<string, unknown>) {
     // 21+ (RSVPs confirm "I'm over 21"), public attendee list, and shown to guests.
     communityAge21: flag(body.communityAge21),
     communityRsvpPublic: flag(body.communityRsvp) ? flag(body.communityRsvpPublic) : 0,
-    communityGuestVisible: body.communityGuestVisible === false ? 0 : 1,
+    communityGuestVisible: guestVisible,
+    communityRsvpGuests: flag(body.communityRsvp) && guestVisible ? flag(body.communityRsvpGuests) : 0,
+    communityIcons: parseIcons(body.communityIcons),
+    communityQuestions: flag(body.communityRsvp) ? parseQuestions(body.communityQuestions) : '[]',
   };
 }
 
@@ -184,8 +189,9 @@ export function register(router: Router): void {
          (id, customer_id, name, starts_at, ends_at, event_type, location, description,
           followup_notes, community_visible, community_details, community_rsvp,
           community_age21, community_rsvp_public, community_guest_visible,
+          community_rsvp_guests, community_icons, community_questions,
           created_at, updated_at, created_by, last_edited_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
         customerId,
@@ -202,6 +208,9 @@ export function register(router: Router): void {
         fields.communityAge21,
         fields.communityRsvpPublic,
         fields.communityGuestVisible,
+        fields.communityRsvpGuests,
+        fields.communityIcons,
+        fields.communityQuestions,
         timestamp,
         timestamp,
         userId,
@@ -239,6 +248,7 @@ export function register(router: Router): void {
          name = ?, starts_at = ?, ends_at = ?, event_type = ?, location = ?, description = ?,
          followup_notes = ?, community_visible = ?, community_details = ?, community_rsvp = ?,
          community_age21 = ?, community_rsvp_public = ?, community_guest_visible = ?,
+         community_rsvp_guests = ?, community_icons = ?, community_questions = ?,
          updated_at = ?, last_edited_by = ?
        WHERE id = ? AND customer_id = ?`,
       [
@@ -255,6 +265,9 @@ export function register(router: Router): void {
         fields.communityAge21,
         fields.communityRsvpPublic,
         fields.communityGuestVisible,
+        fields.communityRsvpGuests,
+        fields.communityIcons,
+        fields.communityQuestions,
         nowIso(),
         userId,
         ctx.params.id!,

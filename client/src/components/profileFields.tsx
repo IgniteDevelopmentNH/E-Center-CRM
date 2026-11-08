@@ -13,6 +13,8 @@ export interface ProfileDraft {
   linkedinUrl: string;
   major: string;
   graduationYear: string;
+  schoolType: '' | 'unh' | 'other';
+  schoolName: string;
   roleTitle: string;
   company: string;
   schedulingUrl: string;
@@ -29,6 +31,8 @@ export function draftFrom(community: CommunityState | null): ProfileDraft {
     linkedinUrl: p?.linkedinUrl ?? '',
     major: p?.major ?? '',
     graduationYear: p?.graduationYear ? String(p.graduationYear) : '',
+    schoolType: p?.schoolType ?? '',
+    schoolName: p?.schoolName ?? '',
     roleTitle: p?.roleTitle ?? '',
     company: p?.company ?? '',
     schedulingUrl: p?.schedulingUrl ?? '',
@@ -46,6 +50,8 @@ export function payloadFrom(draft: ProfileDraft, accountType: AccountType) {
     linkedinUrl: draft.linkedinUrl,
     major: draft.major,
     graduationYear: draft.graduationYear,
+    schoolType: draft.schoolType,
+    schoolName: draft.schoolName,
     roleTitle: draft.roleTitle,
     company: draft.company,
     schedulingUrl: draft.schedulingUrl,
@@ -102,7 +108,7 @@ export function ProfileFields({
           <Field label="Major" error={errorFor('Major')}>
             <TextInput value={draft.major} onChange={(e) => set('major', e.target.value)} invalid={!!errorFor('Major')} />
           </Field>
-          <Field label="Graduation year" error={errorFor('Graduation year')}>
+          <Field label="Graduation year" required error={errorFor('Graduation year')}>
             <TextInput
               inputMode="numeric"
               maxLength={4}
@@ -112,6 +118,19 @@ export function ProfileFields({
               invalid={!!errorFor('Graduation year')}
             />
           </Field>
+          <fieldset className="sm:col-span-2">
+            <legend className="label">
+              Where do you go to school?<span className="ml-0.5 text-urgent">*</span>
+            </legend>
+            <Checkbox label="University of New Hampshire" checked={draft.schoolType === 'unh'} onChange={(on) => onChange({ ...draft, schoolType: on ? 'unh' : '', schoolName: '' })} />
+            <Checkbox label="Another school" checked={draft.schoolType === 'other'} onChange={(on) => onChange({ ...draft, schoolType: on ? 'other' : '' })} />
+            {draft.schoolType === 'other' && (
+              <Field label="School name" error={errorFor('School name')}>
+                <TextInput value={draft.schoolName} maxLength={120} onChange={(e) => set('schoolName', e.target.value)} />
+              </Field>
+            )}
+            {errorFor('School') && <p className="mt-1 text-xs font-semibold text-urgent">{errorFor('School')}</p>}
+          </fieldset>
         </div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2">

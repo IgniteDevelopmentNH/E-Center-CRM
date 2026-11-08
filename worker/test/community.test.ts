@@ -65,6 +65,11 @@ async function api(
   // A distinct client IP per request keeps the per-IP signup limit out of the way.
   const headers: Record<string, string> = { 'CF-Connecting-IP': `10.0.0.${(ipCounter++ % 250) + 1}` };
   if (authToken) headers.Authorization = `Bearer ${authToken}`;
+  // The feed is events only, so tests about something else still give their posts a date.
+  if (/^\/api\/(admin|community)\/posts(\/[^/]+)?$/.test(routePath) && (method === 'POST' || method === 'PUT') && body && !(body instanceof FormData)) {
+    const fields = body as Record<string, unknown>;
+    if (fields.isEvent === undefined) body = { ...fields, isEvent: true, eventStartsAt: fields.eventStartsAt ?? new Date(Date.now() + 14 * 86400000).toISOString() };
+  }
   let payload: BodyInit | undefined;
   if (body instanceof FormData) payload = body;
   else if (body !== undefined) {
@@ -114,7 +119,7 @@ async function createMember(
   const token = created.body.token as string;
   const verify = await api('POST', '/api/auth/verify-email', { token: lastLinkTo(email.trim().toLowerCase()) }, null);
   assert.equal(verify.status, 200, JSON.stringify(verify.body));
-  const update = await api('PUT', '/api/community/profile', { firstName, lastName, ...profile }, token);
+  const update = await api('PUT', '/api/community/profile', { firstName, lastName, ...(accountType === 'student' ? { graduationYear: 2028, schoolType: 'unh' } : {}), ...profile }, token);
   assert.equal(update.status, 200, JSON.stringify(update.body));
   const complete = await api('POST', '/api/community/onboarding/complete', undefined, token);
   assert.equal(complete.status, 200);
@@ -133,6 +138,11 @@ function contactsWithEmail(email: string): any[] {
 function pngFile(name: string): File {
   const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0x0d, 0x49, 0x48, 0x44, 0x52]);
   return new File([bytes], name, { type: 'image/png' });
+}
+
+/** The event posts in a feed response. */
+function feedPosts(feed: { body: any }): any[] {
+  return feed.body.items.filter((item: any) => item.kind === 'post').map((item: any) => item.post);
 }
 
 before(async () => {
@@ -389,7 +399,7 @@ describe('public profiles and private data', () => {
     assert.equal(profile.body.member.bio, 'I help founders.');
     assert.deepEqual(Object.keys(profile.body.member).sort(), [
       'accountType', 'available', 'bio', 'company', 'firstName', 'fullName', 'graduationYear', 'hasPublicResume',
-      'help', 'id', 'interests', 'lastName', 'linkedinUrl', 'major', 'photoUrl', 'roleTitle', 'schedulingUrl',
+      'help', 'id', 'interests', 'lastName', 'linkedinUrl', 'major', 'photoUrl', 'roleTitle', 'schedulingUrl', 'school',
     ]);
     assert.equal(profile.body.member.hasPublicResume, false, 'resumes are private by default');
   });
@@ -481,7 +491,7 @@ describe('admin-authored feed', () => {
     assert.equal(withImage.status, 200);
 
     let feed = await api('GET', '/api/community/feed', undefined, student.token);
-    assert.ok(!feed.body.posts.some((p: any) => p.id === draftId));
+    assert.ok(!feedPosts(feed).some((p: any) => p.id === draftId));
     assert.equal((await api('GET', `/api/community/posts/${draftId}`, undefined, student.token)).status, 404);
     // The staff-scoped preview image link is not a community link.
     const staffImage = withImage.body.post.imageUrl as string;
@@ -489,7 +499,7 @@ describe('admin-authored feed', () => {
 
     await api('POST', `/api/admin/posts/${draftId}/publish`, undefined, editorToken);
     feed = await api('GET', '/api/community/feed', undefined, student.token);
-    const live = feed.body.posts.find((p: any) => p.id === draftId);
+    const live = feedPosts(feed).find((p: any) => p.id === draftId);
     assert.ok(live);
     assert.equal((await api('GET', live.imageUrl, undefined, null)).status, 200);
 
@@ -499,22 +509,22 @@ describe('admin-authored feed', () => {
 
     await api('POST', `/api/admin/posts/${draftId}/archive`, undefined, editorToken);
     feed = await api('GET', '/api/community/feed', undefined, student.token);
-    assert.ok(!feed.body.posts.some((p: any) => p.id === draftId));
+    assert.ok(!feedPosts(feed).some((p: any) => p.id === draftId));
   });
 
-  it('paginates the feed newest first', async () => {
+  it('paginates the feed soonest first', async () => {
     const student = await createMember('student', 'Pag', 'Inate', 'pag.inate@example.org');
     for (let i = 0; i < 4; i += 1) {
-      await api('POST', '/api/admin/posts', { title: `Update ${i}`, body: 'Body', publish: true }, ownerToken);
+      await api('POST', '/api/admin/posts', { title: `Update ${i}`, body: 'Body', publish: true, isEvent: true, eventStartsAt: new Date(Date.now() + (i + 1) * 3600000).toISOString() }, ownerToken);
     }
     const first = await api('GET', '/api/community/feed?limit=2', undefined, student.token);
-    assert.equal(first.body.posts.length, 2);
+    assert.equal(first.body.items.length, 2);
     assert.ok(first.body.nextCursor);
     const second = await api('GET', `/api/community/feed?limit=2&cursor=${encodeURIComponent(first.body.nextCursor)}`, undefined, student.token);
-    const ids = [...first.body.posts, ...second.body.posts].map((p: any) => p.id);
-    assert.equal(new Set(ids).size, ids.length);
-    const times = [...first.body.posts, ...second.body.posts].map((p: any) => p.publishedAt);
-    assert.deepEqual(times, [...times].sort().reverse());
+    const items = [...first.body.items, ...second.body.items];
+    assert.equal(new Set(items.map((item: any) => `${item.kind}:${item.post?.id ?? item.event?.id}`)).size, items.length);
+    const times = items.map((item: any) => item.startsAt);
+    assert.deepEqual(times, [...times].sort());
   });
 
   it('only community-visible events reach the portal', async () => {

@@ -21,9 +21,9 @@ const LINK_LABELS: Record<LinkState, { label: string; tone: Tone }> = {
 };
 
 const POSTING_LABELS: Record<PostPermission, string> = {
-  none: 'Cannot post',
-  approval: 'Posts with approval',
-  direct: 'Posts without approval',
+  none: 'Cannot add events',
+  approval: 'Adds events with approval',
+  direct: 'Adds events without approval',
 };
 
 /** Who can post, per member; "default" follows the account type. */
@@ -38,30 +38,30 @@ function PostingControl({
   busy: boolean;
   onSave: (value: string) => void;
 }) {
-  const typeDefault = account.accountType === 'staff' ? 'Posts without approval' : 'Cannot post';
+  const typeDefault = account.accountType === 'staff' ? 'Adds events without approval' : 'Cannot add events';
   const options = [
     { value: 'default', label: `Default for ${accountTypeLabel(account.accountType).toLowerCase()}s (${typeDefault.toLowerCase()})` },
-    { value: 'none', label: 'Cannot post' },
-    { value: 'approval', label: 'Can post with approval' },
-    { value: 'direct', label: 'Can post without approval' },
+    { value: 'none', label: 'Cannot add events' },
+    { value: 'approval', label: 'Can add events with approval' },
+    { value: 'direct', label: 'Can add events without approval' },
   ];
   return (
     <section className="space-y-2">
-      <h3 className="text-xs font-bold uppercase tracking-wide text-navy-800">Posting</h3>
+      <h3 className="text-xs font-bold uppercase tracking-wide text-navy-800">Adding events</h3>
       {canEdit ? (
         <Select
           value={account.postPermissionOverride ?? 'default'}
           options={options}
           disabled={busy}
-          aria-label="Posting permission"
+          aria-label="Permission to add events"
           onChange={(event) => onSave(event.target.value)}
         />
       ) : (
         <p>{POSTING_LABELS[account.postPermission]}</p>
       )}
       <p className="text-xs text-slate-500">
-        Currently: <span className="font-semibold">{POSTING_LABELS[account.postPermission]}</span>. People who can post get a
-        “Posts” section in the community portal. Posts that need approval wait in Admin &gt; Posts.
+        Currently: <span className="font-semibold">{POSTING_LABELS[account.postPermission]}</span>. People who can add events get a
+        “My events” section in the community portal. Events that need approval wait in Admin &gt; Feed events.
       </p>
     </section>
   );
@@ -353,7 +353,9 @@ function AccountPanel({ userId, onClose, onChanged }: { userId: string; onClose:
             {account.profile.bio && <p className="text-slate-700">{account.profile.bio}</p>}
             <dl className="grid grid-cols-[120px_minmax(0,1fr)] gap-x-3 gap-y-1.5">
               {account.profile.roleTitle && (<><dt className="text-slate-500">Role</dt><dd>{account.profile.roleTitle}{account.profile.company ? ` at ${account.profile.company}` : ''}</dd></>)}
-              {account.profile.major && (<><dt className="text-slate-500">Major</dt><dd>{account.profile.major}{account.profile.graduationYear ? `, ${account.profile.graduationYear}` : ''}</dd></>)}
+              {account.profile.major && (<><dt className="text-slate-500">Major</dt><dd>{account.profile.major}</dd></>)}
+              {account.profile.graduationYear && (<><dt className="text-slate-500">Graduating</dt><dd>{account.profile.graduationYear}</dd></>)}
+              {account.profile.school && (<><dt className="text-slate-500">School</dt><dd>{account.profile.school}</dd></>)}
               {account.profile.linkedinUrl && (<><dt className="text-slate-500">LinkedIn</dt><dd><a href={account.profile.linkedinUrl} target="_blank" rel="noopener noreferrer" className="break-all text-teal-700 hover:underline">{account.profile.linkedinUrl}</a></dd></>)}
               {account.profile.schedulingUrl && (<><dt className="text-slate-500">Scheduling</dt><dd className="break-all">{account.profile.schedulingUrl}</dd></>)}
               {!!account.interests?.length && (<><dt className="text-slate-500">Topics</dt><dd>{[...(account.interests ?? []), ...(account.help ?? [])].map((t) => t.label).filter((v, i, a) => a.indexOf(v) === i).join(', ')}</dd></>)}

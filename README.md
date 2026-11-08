@@ -283,6 +283,15 @@ npx wrangler d1 execute ecenter-crm --remote \
   --file=./worker/src/db/migrations/2026-10-28-community-v3.sql
 ```
 
+`2026-11-08-community-v4.sql` adds student school details, event icons, registration questions,
+guest RSVPs, organization history and performance indexes. It is additive as well, and is applied the
+same way, **before** deploying the matching build:
+
+```bash
+npx wrangler d1 execute ecenter-crm --remote \
+  --file=./worker/src/db/migrations/2026-11-08-community-v4.sql
+```
+
 Locally, `npm run migrate` adds any missing columns to an older dev database before applying
 `schema.sql`, so an existing `worker/data/dev.db` upgrades in place.
 
@@ -347,14 +356,14 @@ and a readable audit log.
 ## Community portal
 
 The community portal is a second interface on the same Worker, database, sessions and R2 bucket.
-Students and mentors sign up, read ECenter news, find mentors and message each other. The CRM moved
+Students and mentors sign up, find ECenter events, meet mentors and message each other. The CRM moved
 under `/admin`.
 
 ### Routes
 
 | Path | Who | What |
 | --- | --- | --- |
-| `/` | Members, staff, guests | Community feed (signed-out visitors see the join / sign-in page, with "Continue as a guest") |
+| `/` | Members, staff, guests | The events feed (signed-out visitors see the join / sign-in page, with "Continue as a guest") |
 | `/posts/:id`, `/events/:id` | Members, staff, guests | A post or event (guests get a read-only view) |
 | `/competitions`, `/competitions/:id` | Members, staff, guests | ECenter competitions and their deadlines |
 | `/groups`, `/groups/:slug` | Members, staff | Topic groups, group feeds, join requests and moderation |
@@ -559,15 +568,25 @@ New audit actions:
 
 ### Events in the portal
 
-- *Upcoming events* (the right column on desktop, a swipeable strip on phones) lists two things:
-  CRM events marked "Show in the community portal", and published event posts.
+- **The feed is events.** It merges event posts, CRM events marked "Show in the community portal"
+  and competition deadlines, soonest first, with a separate Past events view. General posting is gone:
+  new posts must be events. Older non-event posts are kept, still open by direct link and editable,
+  but no longer appear in the feed.
 - Each CRM event can have a **community description** (shown instead of the staff description) and
   **"I'll be there!" RSVPs**.
 - Staff see who RSVP'd in the event panel, and in Admin > Posts for event posts.
 - Event posts and CRM events have three more options: **21+** (an RSVP must confirm "I'm over 21",
   stored on the RSVP), **show the attendee list to members** (otherwise only the organiser and staff
   see it), and **hide from guests**.
-- Published competitions' deadlines also appear in Upcoming events, linking to the competition.
+- Published competitions' deadlines also appear in the feed, linking to the competition.
+- **RSVP** can be off, for account holders, or for everyone including guests. Guests give a name and
+  email; one RSVP per email per event, rate-limited per connection, and removable from the browser
+  that made it. Guests count towards the total but stay out of the attendee list.
+- **Icons**: organisers pick up to eight from a palette (`client/src/lib/eventIcons.ts`; the server's
+  allow-list is in `worker/src/services/eventOptions.ts`).
+- **Registration questions**: up to ten per event: yes/no, pick one, checkboxes or written, each
+  required or optional. Answers are visible only to the organiser and staff, who can view them or
+  download a spreadsheet. Guest email addresses are visible to staff only.
 
 ### Groups
 
@@ -581,6 +600,12 @@ New audit actions:
 - A post can go to **everyone** (main feed) or **only specific groups**: then it appears only in
   those groups' feeds, never in the main feed or to guests, and "Email members" only emails those
   groups' members. Members can post only to groups they have joined.
+
+### Student signup
+
+Students must give a graduation year and say whether they attend UNH or another school before
+`POST /api/community/onboarding/complete` will finish their account. Mentors are not asked. Accounts
+that were already active are unaffected.
 
 ### Businesses and competitions
 
@@ -643,6 +668,19 @@ shows a **View resume** button to other signed-in members, behind the same short
 - **GDPR posture**: soft deletes throughout, full CSV data export, and an audit trail.
 
 ---
+
+## Performance
+
+- **Feed**: one query picks the page; details are fetched in bulk, so page cost does not grow with length.
+- **Indexes**: the busiest lookups (login, session check, feed, organization matching) are indexed, and
+  `community-v4.test.ts` fails if they fall back to a table scan.
+- **Guest pages** are the same for everyone: browsers cache them for 30 seconds, and so does the edge
+  cache once the site is on a custom domain (the Cache API does nothing on `workers.dev`).
+- **Images**: signed links stay identical for an hour, so browsers reuse them, and change when the image does.
+- **Client**: every page is its own chunk; hashed assets are cached for a year; recently viewed pages
+  show instantly while a fresh copy loads; badge polling no longer fires on every navigation.
+- **Housekeeping**: the cron handler removes expired sessions and old rate-limit rows once an hour.
+- **Smart Placement** (`wrangler.toml`) runs the Worker near the database, since a request makes several queries.
 
 ## Multi-tenancy
 

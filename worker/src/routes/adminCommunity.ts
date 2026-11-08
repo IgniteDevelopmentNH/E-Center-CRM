@@ -7,7 +7,7 @@ import { nowIso } from '../lib/time.ts';
 import { oneOf, optionalId, optionalString, positiveInt } from '../lib/validate.ts';
 import { requireEditor, requireStaff } from '../middleware/auth.ts';
 import type { Ctx, Router } from '../router.ts';
-import { finalizeAccount, loadTags, staffLinkAccount } from '../services/community.ts';
+import { finalizeAccount, loadTags, schoolLabel, staffLinkAccount } from '../services/community.ts';
 import { blockEmail, unblockUser } from '../services/blockedEmails.ts';
 import { POST_PERMISSIONS, effectivePostPermission } from '../services/posts.ts';
 
@@ -28,7 +28,7 @@ const LINK_STATES = ['pending', 'linked', 'conflict', 'unlinked', 'not_applicabl
 
 const SELECT_ACCOUNT = `
   SELECT ca.*, u.email, u.email_verified_at, u.role AS user_role, u.last_login_at,
-         p.first_name, p.last_name, p.bio, p.role_title, p.company, p.major, p.graduation_year,
+         p.first_name, p.last_name, p.bio, p.role_title, p.company, p.major, p.graduation_year, p.school_type, p.school_name,
          p.linkedin_url, p.scheduling_url,
          c.first_name AS contact_first_name, c.last_name AS contact_last_name, c.email AS contact_email,
          deactivator.name AS deactivated_by_name
@@ -74,6 +74,7 @@ function accountOut(row: Record<string, unknown>) {
       company: row.company ? String(row.company) : null,
       major: row.major ? String(row.major) : null,
       graduationYear: row.graduation_year ? Number(row.graduation_year) : null,
+      school: schoolLabel(row),
       linkedinUrl: row.linkedin_url ? String(row.linkedin_url) : null,
       schedulingUrl: row.scheduling_url ? String(row.scheduling_url) : null,
     },

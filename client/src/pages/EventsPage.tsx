@@ -1,3 +1,4 @@
+import { ResponsesButton } from '../components/eventOptions.tsx';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { EventForm } from '../components/forms.tsx';
@@ -566,7 +567,7 @@ function EventPanel({
             <section className="rounded-lg border border-teal-100 bg-teal-50/50 p-3">
               <SectionHeader title="Community portal" />
               <p className="text-sm text-slate-600">
-                Shown to students and mentors in Upcoming events{event.communityRsvp ? ', with “I’ll be there!” RSVPs' : ''}.
+                Shown to students and mentors in the feed{event.communityRsvp ? ', with “I’ll be there!” RSVPs' : ''}.
                 {event.communityNotifiedAt && ` Members were emailed ${formatDate(event.communityNotifiedAt)}.`}
               </p>
               {event.communityDetails && (
@@ -575,7 +576,7 @@ function EventPanel({
               {event.communityRsvp && (
                 <div className="mt-3">
                   <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
-                    Going ({data?.communityRsvps.length ?? 0})
+                    Going ({event.communityRsvpCount})
                   </p>
                   {data && data.communityRsvps.length === 0 && <p className="text-sm text-slate-500">No RSVPs yet.</p>}
                   <ul className="mt-1 flex flex-wrap gap-1.5">
@@ -585,6 +586,9 @@ function EventPanel({
                       </li>
                     ))}
                   </ul>
+                  <div className="mt-1">
+                    <ResponsesButton target="event" id={event.id} title={event.name} />
+                  </div>
                 </div>
               )}
               {canEdit && (

@@ -63,6 +63,11 @@ let ipCounter = 0;
 async function api(method: string, routePath: string, body?: unknown, authToken: string | null = ownerToken) {
   const headers: Record<string, string> = { 'CF-Connecting-IP': `10.1.0.${(ipCounter++ % 250) + 1}` };
   if (authToken) headers.Authorization = `Bearer ${authToken}`;
+  // The feed is events only, so tests about something else still give their posts a date.
+  if (/^\/api\/(admin|community)\/posts(\/[^/]+)?$/.test(routePath) && (method === 'POST' || method === 'PUT') && body && !(body instanceof FormData)) {
+    const fields = body as Record<string, unknown>;
+    if (fields.isEvent === undefined) body = { ...fields, isEvent: true, eventStartsAt: fields.eventStartsAt ?? new Date(Date.now() + 14 * 86400000).toISOString() };
+  }
   let payload: BodyInit | undefined;
   if (body instanceof FormData) payload = body;
   else if (body !== undefined) {
@@ -104,7 +109,7 @@ async function createMember(accountType: 'student' | 'mentor', first: string, la
   const message = [...outbox].reverse().find((m) => m.to === email && m.text.includes('/verify-email?'))!;
   const token = /token=([a-f0-9]+)/.exec(message.text)![1]!;
   assert.equal((await api('POST', '/api/auth/verify-email', { token }, null)).status, 200);
-  assert.equal((await api('PUT', '/api/community/profile', { firstName: first, lastName: last, ...profile }, created.body.token)).status, 200);
+  assert.equal((await api('PUT', '/api/community/profile', { firstName: first, lastName: last, ...(accountType === 'student' ? { graduationYear: 2028, schoolType: 'unh' } : {}), ...profile }, created.body.token)).status, 200);
   const done = await api('POST', '/api/community/onboarding/complete', undefined, created.body.token);
   assert.equal(done.body.community.status, 'active');
   return { token: created.body.token, userId: created.body.user.id, email };
@@ -123,6 +128,11 @@ const inDays = (days: number) => new Date(Date.now() + days * 86400000).toISOStr
 let student: Member;
 let mentor: Member;
 let other: Member;
+
+/** The event posts in a feed response. */
+function feedPosts(feed: { body: any }): any[] {
+  return feed.body.items.filter((item: any) => item.kind === 'post').map((item: any) => item.post);
+}
 
 before(async () => {
   const here = path.dirname(fileURLToPath(import.meta.url));
@@ -236,10 +246,10 @@ describe('guest access', () => {
 
     const feed = await api('GET', '/api/public/feed?limit=30', undefined, null);
     assert.equal(feed.status, 200);
-    const ids = feed.body.posts.map((p: { id: string }) => p.id);
+    const ids = feedPosts(feed).map((p: { id: string }) => p.id);
     assert.ok(ids.includes(shown.body.post.id));
     assert.ok(!ids.includes(hidden.body.post.id));
-    const post = feed.body.posts.find((p: { id: string }) => p.id === shown.body.post.id);
+    const post = feedPosts(feed).find((p: { id: string }) => p.id === shown.body.post.id);
     // Member authors: first name and last initial, no profile link or photo.
     assert.equal(post.author.name, 'Manny M.');
     assert.equal(post.author.id, null);
@@ -354,7 +364,7 @@ describe('groups', () => {
     const id = post.body.post.id;
 
     const feed = await api('GET', '/api/community/feed?limit=30', undefined, student.token);
-    assert.ok(!feed.body.posts.some((p: { id: string }) => p.id === id));
+    assert.ok(!feedPosts(feed).some((p: { id: string }) => p.id === id));
     const groupFeed = await api('GET', `/api/community/groups/${groupId}/posts`, undefined, student.token);
     assert.ok(groupFeed.body.posts.some((p: { id: string }) => p.id === id));
     assert.equal((await api('GET', `/api/community/posts/${id}`, undefined, student.token)).status, 200);

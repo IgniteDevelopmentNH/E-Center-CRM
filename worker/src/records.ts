@@ -9,6 +9,7 @@
  */
 
 import { todayDate } from './lib/time.ts';
+import { readIcons, readQuestions } from './services/eventOptions.ts';
 
 export const CONTACT_TAGS = [
   'Student',
@@ -236,6 +237,9 @@ export function eventOut(row: Record<string, unknown>) {
     communityAge21: num(row.community_age21) === 1,
     communityRsvpPublic: num(row.community_rsvp_public) === 1,
     communityGuestVisible: row.community_guest_visible === undefined ? true : num(row.community_guest_visible) === 1,
+    communityRsvpGuests: num(row.community_rsvp_guests) === 1,
+    communityIcons: readIcons(row.community_icons),
+    communityQuestions: readQuestions(row.community_questions),
     communityNotifiedAt: iso(row.community_notified_at),
     attendeeCount: num(row.attendee_count),
     externalId: text(row.external_id),

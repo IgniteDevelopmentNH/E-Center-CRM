@@ -4,15 +4,20 @@ import { newId } from '../lib/ids.ts';
 import { recordMentions, sanitizeMentions } from '../lib/mentions.ts';
 import { enforceRateLimit } from '../lib/rateLimit.ts';
 import { nowIso } from '../lib/time.ts';
+import { toCsv } from '../lib/csv.ts';
 import { optionalId, positiveInt, requiredString } from '../lib/validate.ts';
 import {
   isStaffRole,
   requireActiveCommunityMember,
   requireCommunityViewer,
   requireSession,
+  requireStaff,
 } from '../middleware/auth.ts';
 import type { AuthContext, Ctx, Router } from '../router.ts';
 import { photoUrl } from '../services/community.ts';
+import { parseAnswers, readAnswers, readQuestions } from '../services/eventOptions.ts';
+import type { RegistrationQuestion } from '../services/eventOptions.ts';
+import { COMMUNITY_EVENT_COLUMNS, communityEventOut, loadEventFeed } from '../services/feed.ts';
 import { storeCommunityUpload } from '../services/communityFiles.ts';
 import { postAudienceVisibleSql, replacePostGroupsWrites, resolvePostGroups } from '../services/groups.ts';
 import { enqueueMentionNotifications } from '../services/notifications.ts';
@@ -192,36 +197,16 @@ export function publicEvent(row: Record<string, unknown>) {
 export function register(router: Router): void {
   /* --------------------------------------------------------- feed -- */
 
-  /** Published posts only, newest first, keyset-paginated. Pending, draft and removed posts never appear. */
+  /** The feed is events: soonest first (or ?when=past, latest first), keyset-paginated. */
   router.get('/api/community/feed', async (ctx: Ctx) => {
     const { auth } = await requireCommunityViewer(ctx);
-    const limit = positiveInt(ctx.query.get('limit'), 10, 30);
-    // Group-only posts appear in their groups' feeds, never the main feed.
-    const where = [
-      `p.customer_id = ?`,
-      `p.status = 'published'`,
-      `p.deleted_at IS NULL`,
-      `p.published_at IS NOT NULL`,
-      `p.audience = 'everyone'`,
-    ];
-    const params: SqlParam[] = [auth.customerId];
-    const cursor = ctx.query.get('cursor');
-    if (cursor) {
-      const [publishedAt, id] = cursor.split('|');
-      if (!publishedAt || !id) throw badRequest('Invalid cursor.');
-      where.push('(p.published_at < ? OR (p.published_at = ? AND p.id < ?))');
-      params.push(publishedAt, publishedAt, id);
-    }
-    const rows = await ctx.db.all<Record<string, unknown>>(
-      `${POST_SELECT} WHERE ${where.join(' AND ')} ORDER BY p.published_at DESC, p.id DESC LIMIT ?`,
-      [...viewerParams(auth), ...params, limit + 1],
+    return jsonResponse(
+      await loadEventFeed(ctx, {
+        customerId: auth.customerId,
+        viewerId: auth.userId,
+        postOut: (row) => communityPostOut(ctx, row, auth),
+      }),
     );
-    const page = rows.slice(0, limit);
-    const last = page[page.length - 1];
-    return jsonResponse({
-      posts: await Promise.all(page.map((row) => communityPostOut(ctx, row, auth))),
-      nextCursor: rows.length > limit && last ? `${String(last.published_at)}|${String(last.id)}` : null,
-    });
   });
 
   router.get('/api/community/posts/:id', async (ctx: Ctx) => {
@@ -326,8 +311,37 @@ export function register(router: Router): void {
     const post = await requirePublishedPost(ctx, ctx.params.id!, auth);
     if (!post.event_starts_at || Number(post.rsvp_enabled) !== 1) throw badRequest('This post does not take RSVPs.');
     return jsonResponse(
-      await setRsvp(ctx, auth, 'post', String(post.id), await readJson(ctx.req), Number(post.event_age21) === 1),
+      await setRsvp(ctx, auth, 'post', String(post.id), await readJson(ctx.req), {
+        age21: Number(post.event_age21) === 1,
+        questions: readQuestions(post.rsvp_questions),
+      }),
     );
+  });
+
+  /** The viewer's own RSVP, so they can review or change their answers. */
+  router.get('/api/community/posts/:id/rsvp', async (ctx: Ctx) => {
+    const { auth } = await requireActiveCommunityMember(ctx);
+    const post = await requirePublishedPost(ctx, ctx.params.id!, auth);
+    return jsonResponse(await myRsvp(ctx, auth, 'post', String(post.id)));
+  });
+
+  /** Everyone who RSVP'd with their answers: the organiser and staff only. Add ?format=csv to download. */
+  router.get('/api/community/posts/:id/responses', async (ctx: Ctx) => {
+    const auth = requireSession(ctx);
+    const post = await loadPost(ctx, ctx.params.id!, auth);
+    if (!post) throw notFound('That event is not available.');
+    if (String(post.author_id) !== auth.userId && !isStaffRole(auth.role)) throw forbidden('Only the organiser and ECenter staff can see responses.');
+    return responsesResponse(ctx, auth, 'post', String(post.id), readQuestions(post.rsvp_questions));
+  });
+
+  router.get('/api/community/events/:id/responses', async (ctx: Ctx) => {
+    const auth = requireStaff(ctx);
+    const event = await ctx.db.get<{ id: string; community_questions: string }>(
+      `SELECT id, community_questions FROM events WHERE id = ? AND customer_id = ? AND deleted_at IS NULL`,
+      [ctx.params.id!, auth.customerId],
+    );
+    if (!event) throw notFound('That event is not available.');
+    return responsesResponse(ctx, auth, 'event', event.id, readQuestions(event.community_questions));
   });
 
   /** The attendee list: public if the organiser chose so; always for the author and moderators. */
@@ -356,16 +370,24 @@ export function register(router: Router): void {
 
   router.post('/api/community/events/:id/rsvp', async (ctx: Ctx) => {
     const { auth } = await requireActiveCommunityMember(ctx);
-    const event = await ctx.db.get<{ id: string; community_rsvp: number; community_age21: number }>(
-      `SELECT id, community_rsvp, community_age21 FROM events
+    const event = await ctx.db.get<{ id: string; community_rsvp: number; community_age21: number; community_questions: string }>(
+      `SELECT id, community_rsvp, community_age21, community_questions FROM events
         WHERE id = ? AND customer_id = ? AND deleted_at IS NULL AND community_visible = 1`,
       [ctx.params.id!, auth.customerId],
     );
     if (!event) throw notFound('That event is not available.');
     if (Number(event.community_rsvp) !== 1) throw badRequest('This event does not take RSVPs.');
     return jsonResponse(
-      await setRsvp(ctx, auth, 'event', event.id, await readJson(ctx.req), Number(event.community_age21) === 1),
+      await setRsvp(ctx, auth, 'event', event.id, await readJson(ctx.req), {
+        age21: Number(event.community_age21) === 1,
+        questions: readQuestions(event.community_questions),
+      }),
     );
+  });
+
+  router.get('/api/community/events/:id/rsvp', async (ctx: Ctx) => {
+    const { auth } = await requireActiveCommunityMember(ctx);
+    return jsonResponse(await myRsvp(ctx, auth, 'event', ctx.params.id!));
   });
 
   /* ------------------------------------------------------- events -- */
@@ -382,31 +404,13 @@ export function register(router: Router): void {
   router.get('/api/community/events/:id', async (ctx: Ctx) => {
     const { auth } = await requireCommunityViewer(ctx);
     const row = await ctx.db.get<Record<string, unknown>>(
-      `SELECT e.id, e.name, e.starts_at, e.ends_at, e.location, e.community_details, e.community_rsvp,
-              e.community_age21, e.community_rsvp_public, e.community_guest_visible,
-              (SELECT COUNT(*) FROM event_rsvps r WHERE r.target_type = 'event' AND r.target_id = e.id) AS rsvp_count,
-              EXISTS (SELECT 1 FROM event_rsvps r WHERE r.target_type = 'event' AND r.target_id = e.id AND r.user_id = ?) AS going
+      `SELECT ${COMMUNITY_EVENT_COLUMNS}
          FROM events e
         WHERE e.id = ? AND e.customer_id = ? AND e.deleted_at IS NULL AND e.community_visible = 1`,
       [auth.userId, ctx.params.id!, auth.customerId],
     );
     if (!row) throw notFound('That event is not available.');
-    return jsonResponse({
-      event: {
-        id: String(row.id),
-        name: String(row.name),
-        startsAt: String(row.starts_at),
-        endsAt: row.ends_at ? String(row.ends_at) : null,
-        location: row.location ? String(row.location) : null,
-        details: row.community_details ? String(row.community_details) : null,
-        rsvpEnabled: Number(row.community_rsvp) === 1,
-        rsvpCount: Number(row.rsvp_count ?? 0),
-        going: Number(row.going ?? 0) === 1,
-        age21: Number(row.community_age21) === 1,
-        attendeesPublic: Number(row.community_rsvp_public) === 1,
-        guestVisible: Number(row.community_guest_visible) === 1,
-      },
-    });
+    return jsonResponse({ event: communityEventOut(row) });
   });
 
   /* ------------------------------------------------- member posts -- */
@@ -431,7 +435,7 @@ export function register(router: Router): void {
       message: 'You have posted a lot recently. Please try again later.',
     });
     const body = await readJson(ctx.req);
-    const fields = await parsePostFields(ctx.db, auth.customerId, body);
+    const fields = await parsePostFields(ctx.db, auth.customerId, body, { requireEvent: true });
     const groupIds = await resolvePostGroups(ctx.db, auth, fields.audience, body.groupIds);
     const id = newId();
     const timestamp = nowIso();
@@ -441,13 +445,15 @@ export function register(router: Router): void {
         sql: `INSERT INTO posts (id, customer_id, title, body, link_url, status, published_at, author_id, author_kind,
                             event_starts_at, event_ends_at, event_location, rsvp_enabled,
                             event_age21, rsvp_list_public, guest_visible, audience,
+                            rsvp_guests, event_icons, rsvp_questions,
                             created_at, updated_at, created_by, last_edited_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'member', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'member', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         params: [
           id, auth.customerId, fields.title, fields.body, fields.linkUrl, status,
           status === 'published' ? timestamp : null, auth.userId,
           fields.eventStartsAt, fields.eventEndsAt, fields.eventLocation, fields.rsvpEnabled,
           fields.eventAge21, fields.rsvpListPublic, fields.guestVisible, fields.audience,
+          fields.rsvpGuests, fields.eventIcons, fields.rsvpQuestions,
           timestamp, timestamp, auth.userId, auth.userId,
         ],
       },
@@ -477,7 +483,7 @@ export function register(router: Router): void {
     if (String(existing.status) === 'archived') throw badRequest('This post was archived by the ECenter and cannot be edited.');
 
     const body = await readJson(ctx.req);
-    const fields = await parsePostFields(ctx.db, auth.customerId, body);
+    const fields = await parsePostFields(ctx.db, auth.customerId, body, { requireEvent: !!existing.event_starts_at });
     const groupIds = await resolvePostGroups(ctx.db, auth, fields.audience, body.groupIds);
     const timestamp = nowIso();
     const nextStatus = permission === 'direct' ? 'published' : 'pending';
@@ -485,14 +491,15 @@ export function register(router: Router): void {
     await ctx.db.batch([
       {
         sql: `UPDATE posts SET title = ?, body = ?, link_url = ?, event_starts_at = ?, event_ends_at = ?, event_location = ?,
-                rsvp_enabled = ?, event_age21 = ?, rsvp_list_public = ?, guest_visible = ?, audience = ?, status = ?,
+                rsvp_enabled = ?, event_age21 = ?, rsvp_list_public = ?, guest_visible = ?, audience = ?,
+                rsvp_guests = ?, event_icons = ?, rsvp_questions = ?, status = ?,
                 published_at = CASE WHEN ? = 'published' THEN COALESCE(published_at, ?) ELSE published_at END,
                 review_note = NULL, updated_at = ?, last_edited_by = ?
           WHERE id = ?`,
         params: [
           fields.title, fields.body, fields.linkUrl, fields.eventStartsAt, fields.eventEndsAt, fields.eventLocation,
           fields.rsvpEnabled, fields.eventAge21, fields.rsvpListPublic, fields.guestVisible, fields.audience,
-          nextStatus, nextStatus, timestamp, timestamp, auth.userId, String(existing.id),
+          fields.rsvpGuests, fields.eventIcons, fields.rsvpQuestions, nextStatus, nextStatus, timestamp, timestamp, auth.userId, String(existing.id),
         ],
       },
       ...replacePostGroupsWrites(String(existing.id), auth.customerId, groupIds),
@@ -563,28 +570,111 @@ async function setRsvp(
   targetType: 'post' | 'event',
   targetId: string,
   body: Record<string, unknown>,
-  age21: boolean,
+  rules: { age21: boolean; questions: RegistrationQuestion[] },
 ) {
+  const { age21, questions } = rules;
   const going = body.going !== false;
   if (going) {
     // A 21+ event needs the attendee's "I'm over 21" confirmation.
     if (age21 && body.over21 !== true) {
       throw badRequest('This is a 21+ event. Confirm you are 21 or older to RSVP.', 'Over 21');
     }
+    const answers = parseAnswers(questions, body.answers);
     await ctx.db.run(
-      `INSERT INTO event_rsvps (target_type, target_id, user_id, customer_id, over21_confirmed, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)
-       ON CONFLICT (target_type, target_id, user_id) DO UPDATE SET over21_confirmed = excluded.over21_confirmed`,
-      [targetType, targetId, auth.userId, auth.customerId, age21 ? 1 : 0, nowIso()],
+      `INSERT INTO event_rsvps (target_type, target_id, user_id, customer_id, over21_confirmed, answers_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (target_type, target_id, user_id)
+       DO UPDATE SET over21_confirmed = excluded.over21_confirmed, answers_json = excluded.answers_json`,
+      [targetType, targetId, auth.userId, auth.customerId, age21 ? 1 : 0, answers, nowIso()],
     );
   } else {
     await ctx.db.run(`DELETE FROM event_rsvps WHERE target_type = ? AND target_id = ? AND user_id = ?`, [
       targetType, targetId, auth.userId,
     ]);
   }
+  return { going, rsvpCount: await rsvpTotal(ctx, targetType, targetId) };
+}
+
+export async function rsvpTotal(ctx: Ctx, targetType: 'post' | 'event', targetId: string): Promise<number> {
   const count = await ctx.db.get<{ total: unknown }>(
-    `SELECT COUNT(*) AS total FROM event_rsvps WHERE target_type = ? AND target_id = ?`,
-    [targetType, targetId],
+    `SELECT (SELECT COUNT(*) FROM event_rsvps WHERE target_type = ? AND target_id = ?)
+          + (SELECT COUNT(*) FROM event_guest_rsvps WHERE target_type = ? AND target_id = ?) AS total`,
+    [targetType, targetId, targetType, targetId],
   );
-  return { going, rsvpCount: Number(count?.total ?? 0) };
+  return Number(count?.total ?? 0);
+}
+
+async function myRsvp(ctx: Ctx, auth: AuthContext, targetType: 'post' | 'event', targetId: string) {
+  const row = await ctx.db.get<{ answers_json: string }>(
+    `SELECT answers_json FROM event_rsvps WHERE target_type = ? AND target_id = ? AND user_id = ?`,
+    [targetType, targetId, auth.userId],
+  );
+  return { going: !!row, answers: row ? readAnswers(row.answers_json) : {} };
+}
+
+/** Member and guest RSVPs with answers. Guest emails go to staff only. */
+async function responsesResponse(
+  ctx: Ctx,
+  auth: AuthContext,
+  targetType: 'post' | 'event',
+  targetId: string,
+  questions: RegistrationQuestion[],
+) {
+  const [members, guests] = await Promise.all([
+    ctx.db.all<Record<string, unknown>>(
+      `SELECT r.created_at, r.over21_confirmed, r.answers_json, ca.account_type, u.name AS user_name, p.first_name, p.last_name
+         FROM event_rsvps r JOIN users u ON u.id = r.user_id
+         LEFT JOIN community_profiles p ON p.user_id = r.user_id
+         LEFT JOIN community_accounts ca ON ca.user_id = r.user_id
+        WHERE r.target_type = ? AND r.target_id = ?
+        ORDER BY r.created_at ASC LIMIT 2000`,
+      [targetType, targetId],
+    ),
+    ctx.db.all<Record<string, unknown>>(
+      `SELECT name, email, over21_confirmed, answers_json, created_at FROM event_guest_rsvps
+        WHERE target_type = ? AND target_id = ? ORDER BY created_at ASC LIMIT 2000`,
+      [targetType, targetId],
+    ),
+  ]);
+  const staff = isStaffRole(auth.role);
+  const responses = [
+    ...members.map((row) => ({
+      kind: 'member' as const,
+      name: row.first_name ? `${String(row.first_name)} ${String(row.last_name ?? '')}`.trim() : String(row.user_name ?? 'Member'),
+      type: String(row.account_type ?? 'student'),
+      email: null as string | null,
+      over21: Number(row.over21_confirmed) === 1,
+      answers: readAnswers(row.answers_json),
+      createdAt: String(row.created_at),
+    })),
+    ...guests.map((row) => ({
+      kind: 'guest' as const,
+      name: String(row.name),
+      type: 'guest',
+      email: staff ? String(row.email) : null,
+      over21: Number(row.over21_confirmed) === 1,
+      answers: readAnswers(row.answers_json),
+      createdAt: String(row.created_at),
+    })),
+  ];
+  if (ctx.query.get('format') !== 'csv') return jsonResponse({ questions, responses });
+
+  type Row = Record<string, unknown>;
+  const rows: Row[] = responses.map((response) => ({
+    name: response.name,
+    type: response.type,
+    email: response.email ?? '',
+    over21: response.over21,
+    rsvpAt: response.createdAt,
+    ...Object.fromEntries(questions.map((q) => [`q:${q.id}`, response.answers[q.id] ?? ''])),
+  }));
+  const csv = toCsv<Row>(rows, [
+    { key: 'name', label: 'Name' },
+    { key: 'type', label: 'Type' },
+    ...(staff ? [{ key: 'email', label: 'Guest email' }] : []),
+    { key: 'over21', label: 'Confirmed over 21' },
+    { key: 'rsvpAt', label: 'RSVP date' },
+    ...questions.map((q) => ({ key: `q:${q.id}`, label: q.label })),
+  ]);
+  return new Response(csv, { headers: { 'Content-Type': 'text/csv; charset=utf-8' } });
 }

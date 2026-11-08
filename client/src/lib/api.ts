@@ -11,6 +11,9 @@ export class ApiError extends Error {
   }
 }
 
+/** Last response per page, shown instantly on return while a fresh copy loads. Emptied on sign-in and sign-out. */
+export const recentResponses = new Map<string, unknown>();
+
 export function getToken(): string | null {
   try {
     return localStorage.getItem(TOKEN_KEY) ?? sessionStorage.getItem(TOKEN_KEY);
@@ -21,6 +24,7 @@ export function getToken(): string | null {
 
 /** `remember` decides whether the session survives closing the browser. */
 export function setToken(token: string | null, remember = true): void {
+  recentResponses.clear();
   try {
     localStorage.removeItem(TOKEN_KEY);
     sessionStorage.removeItem(TOKEN_KEY);

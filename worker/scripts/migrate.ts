@@ -55,6 +55,16 @@ const ADDED_COLUMNS: { table: string; column: string; definition: string }[] = [
   { table: 'events', column: 'community_guest_visible', definition: 'INTEGER NOT NULL DEFAULT 1' },
   { table: 'event_rsvps', column: 'over21_confirmed', definition: 'INTEGER NOT NULL DEFAULT 0' },
   { table: 'community_accounts', column: 'group_permission', definition: 'TEXT' },
+  // 2026-11-08-community-v4
+  { table: 'community_profiles', column: 'school_type', definition: 'TEXT' },
+  { table: 'community_profiles', column: 'school_name', definition: 'TEXT' },
+  { table: 'posts', column: 'rsvp_guests', definition: 'INTEGER NOT NULL DEFAULT 0' },
+  { table: 'posts', column: 'event_icons', definition: "TEXT NOT NULL DEFAULT '[]'" },
+  { table: 'posts', column: 'rsvp_questions', definition: "TEXT NOT NULL DEFAULT '[]'" },
+  { table: 'events', column: 'community_rsvp_guests', definition: 'INTEGER NOT NULL DEFAULT 0' },
+  { table: 'events', column: 'community_icons', definition: "TEXT NOT NULL DEFAULT '[]'" },
+  { table: 'events', column: 'community_questions', definition: "TEXT NOT NULL DEFAULT '[]'" },
+  { table: 'event_rsvps', column: 'answers_json', definition: "TEXT NOT NULL DEFAULT '{}'" },
 ];
 
 function main(): void {

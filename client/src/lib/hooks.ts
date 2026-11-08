@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ApiError, api } from './api.ts';
+import { ApiError, api, recentResponses } from './api.ts';
 import { useAuth } from '../state/AuthContext.tsx';
+
+const RECENT_LIMIT = 60;
 
 interface AsyncState<T> {
   data: T | null;
@@ -16,7 +18,11 @@ export function useApi<T>(path: string | null, deps: unknown[] = []): AsyncState
   reload: () => void;
   setData: (updater: (previous: T | null) => T | null) => void;
 } {
-  const [state, setState] = useState<AsyncState<T>>({ data: null, loading: !!path, error: null });
+  const [state, setState] = useState<AsyncState<T>>({
+    data: path ? ((recentResponses.get(path) as T | undefined) ?? null) : null,
+    loading: !!path,
+    error: null,
+  });
   const [nonce, setNonce] = useState(0);
   const requestId = useRef(0);
 
@@ -26,11 +32,15 @@ export function useApi<T>(path: string | null, deps: unknown[] = []): AsyncState
       return;
     }
     const id = ++requestId.current;
-    setState((previous) => ({ ...previous, loading: true, error: null }));
+    const recent = recentResponses.get(path) as T | undefined;
+    setState((previous) => ({ data: recent ?? previous.data, loading: true, error: null }));
 
     api
       .get<T>(path)
       .then((data) => {
+        recentResponses.delete(path);
+        recentResponses.set(path, data);
+        if (recentResponses.size > RECENT_LIMIT) recentResponses.delete(recentResponses.keys().next().value as string);
         if (id === requestId.current) setState({ data, loading: false, error: null });
       })
       .catch((error: unknown) => {
@@ -44,8 +54,12 @@ export function useApi<T>(path: string | null, deps: unknown[] = []): AsyncState
   const reload = useCallback(() => setNonce((n) => n + 1), []);
   const setData = useCallback(
     (updater: (previous: T | null) => T | null) =>
-      setState((previous) => ({ ...previous, data: updater(previous.data) })),
-    [],
+      setState((previous) => {
+        const data = updater(previous.data);
+        if (path && data) recentResponses.set(path, data);
+        return { ...previous, data };
+      }),
+    [path],
   );
 
   return { ...state, reload, setData };

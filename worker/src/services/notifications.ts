@@ -440,7 +440,18 @@ export async function processOutbox(db: Db, env: Env, config: Config, limit = BA
   return result;
 }
 
+/** Clears data that has no further use, so the tables behind every request stay small. */
+export async function purgeExpiredData(db: Db): Promise<void> {
+  const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  await db.batch([
+    { sql: `DELETE FROM sessions WHERE expires_at < ?`, params: [nowIso()] },
+    { sql: `DELETE FROM rate_limit_events WHERE created_at < ?`, params: [dayAgo] },
+  ]);
+}
+
 /** Entry point for the Worker's `scheduled` handler. */
 export async function runScheduledNotifications(env: Env): Promise<OutboxRunResult> {
-  return processOutbox(createD1Db(env.DB), env, loadConfig(env));
+  const db = createD1Db(env.DB);
+  if (new Date().getUTCMinutes() === 7) await purgeExpiredData(db);
+  return processOutbox(db, env, loadConfig(env));
 }

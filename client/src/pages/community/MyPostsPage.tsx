@@ -19,7 +19,7 @@ const STATUS: Record<FeedPost['status'], { label: string; tone: Tone }> = {
   archived: { label: 'Archived', tone: 'slate' },
 };
 
-/** A member's own posts (shown in the nav only for people allowed to post). */
+/** A member's own events (shown in the nav only for people allowed to add them). */
 export function MyPostsPage() {
   const { community } = useAuth();
   const toast = useToast();
@@ -35,7 +35,7 @@ export function MyPostsPage() {
     try {
       await api.delete(`/community/posts/${post.id}`);
       setData((current) => (current ? { posts: current.posts.filter((p) => p.id !== post.id) } : current));
-      toast.success('Post removed.');
+      toast.success('Removed.');
     } catch (caught) {
       toast.error(caught instanceof ApiError ? caught.message : 'That did not work.');
     }
@@ -45,28 +45,28 @@ export function MyPostsPage() {
     <div className="mx-auto max-w-3xl space-y-5">
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-navy-800">My posts</h1>
+          <h1 className="text-2xl font-bold text-navy-800">My events</h1>
           <p className="mt-1 text-sm text-slate-500">
             {!canPost
-              ? 'Your account cannot create new posts right now. You can still take down existing ones.'
+              ? 'Your account cannot add new events right now. You can still take down existing ones.'
               : needsApproval
-                ? 'The ECenter approves posts before they appear in the feed.'
-                : 'Your posts appear in the feed as soon as you share them.'}
+                ? 'The ECenter approves events before they appear in the feed.'
+                : 'Your events appear in the feed as soon as you add them.'}
           </p>
         </div>
         {canPost && (
-          <button type="button" className="btn-primary" onClick={() => setEditing('new')}>+ New post</button>
+          <button type="button" className="btn-primary" onClick={() => setEditing('new')}>+ New event</button>
         )}
       </header>
 
-      {loading && !data && <LoadingBlock label="Loading your posts" />}
+      {loading && !data && <LoadingBlock label="Loading your events" />}
       {error && <ErrorBlock message={error} onRetry={reload} />}
       {data && data.posts.length === 0 && (
         <EmptyState
-          title="You haven't posted yet"
-          message="Share news, an opportunity, or an event with the community."
+          title="You haven't added an event yet"
+          message="Share an event with the community."
           icon="▤"
-          action={canPost ? <button type="button" className="btn-primary" onClick={() => setEditing('new')}>Write a post</button> : undefined}
+          action={canPost ? <button type="button" className="btn-primary" onClick={() => setEditing('new')}>Add an event</button> : undefined}
         />
       )}
 

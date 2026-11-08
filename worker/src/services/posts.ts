@@ -8,7 +8,8 @@ import { flag, optionalString, optionalTimestamp, requiredString } from '../lib/
 import type { AuthContext, Ctx } from '../router.ts';
 import { isStaffRole } from '../middleware/auth.ts';
 import { photoUrl } from './community.ts';
-import { signValue } from '../lib/signedToken.ts';
+import { IMAGE_LINK_ALIGN_SECONDS, imageVersion, signValue } from '../lib/signedToken.ts';
+import { parseIcons, parseQuestions, readIcons, readQuestions, rsvpCountSql } from './eventOptions.ts';
 
 /**
  * Posts are written by staff (from the CRM) and, with permission, by members
@@ -56,6 +57,12 @@ export interface PostFields {
   eventEndsAt: string | null;
   eventLocation: string | null;
   rsvpEnabled: 0 | 1;
+  /** Guests without an account may RSVP too. */
+  rsvpGuests: 0 | 1;
+  /** JSON array of icon keys. */
+  eventIcons: string;
+  /** JSON array of registration questions. */
+  rsvpQuestions: string;
   /** 21+ event: an RSVP must confirm "I'm over 21". */
   eventAge21: 0 | 1;
   /** Members can see who is going. */
@@ -67,16 +74,26 @@ export interface PostFields {
   mentionIds: string[];
 }
 
-export async function parsePostFields(db: Db, customerId: string, body: Record<string, unknown>): Promise<PostFields> {
+export async function parsePostFields(
+  db: Db,
+  customerId: string,
+  body: Record<string, unknown>,
+  options: { requireEvent?: boolean } = {},
+): Promise<PostFields> {
   const title = requiredString(body.title, 'Title', { max: 200 });
   const rawBody = requiredString(body.body, 'Body', { max: 10000 });
   const { text, userIds } = await sanitizeMentions(db, customerId, rawBody);
 
   // An event post has one date & time for the whole event (no separate end).
   const isEvent = flag(body.isEvent) === 1;
+  // The feed is events only. Older non-event posts can still be edited as they are.
+  if (options.requireEvent && !isEvent) throw badRequest('Choose the date and time of the event.', 'Event start');
   const eventStartsAt = isEvent ? optionalTimestamp(body.eventStartsAt, 'Event start') : null;
   if (isEvent && !eventStartsAt) throw badRequest('Choose the date and time of the event.', 'Event start');
   const eventEndsAt = null;
+  const rsvpEnabled = isEvent ? flag(body.rsvpEnabled) : 0;
+  const guestVisible = body.guestVisible === false ? 0 : 1;
+  const audience = body.audience === 'groups' ? 'groups' : 'everyone';
   return {
     title,
     body: text,
@@ -84,12 +101,16 @@ export async function parsePostFields(db: Db, customerId: string, body: Record<s
     eventStartsAt,
     eventEndsAt,
     eventLocation: isEvent ? optionalString(body.eventLocation, 'Event location', { max: 200 }) : null,
-    rsvpEnabled: isEvent ? flag(body.rsvpEnabled) : 0,
+    rsvpEnabled,
+    // Guests can only RSVP to events they are able to see.
+    rsvpGuests: rsvpEnabled && guestVisible && audience === 'everyone' ? flag(body.rsvpGuests) : 0,
+    eventIcons: isEvent ? parseIcons(body.eventIcons) : '[]',
+    rsvpQuestions: rsvpEnabled ? parseQuestions(body.rsvpQuestions) : '[]',
     eventAge21: isEvent ? flag(body.eventAge21) : 0,
-    rsvpListPublic: isEvent && flag(body.rsvpEnabled) ? flag(body.rsvpListPublic) : 0,
+    rsvpListPublic: rsvpEnabled ? flag(body.rsvpListPublic) : 0,
     // Visible to guests unless the author hides it.
-    guestVisible: body.guestVisible === false ? 0 : 1,
-    audience: body.audience === 'groups' ? 'groups' : 'everyone',
+    guestVisible,
+    audience,
     mentionIds: userIds,
   };
 }
@@ -125,7 +146,7 @@ export const POST_SELECT = `
          e.id AS ev_id, e.name AS ev_name, e.starts_at AS ev_starts_at, e.ends_at AS ev_ends_at, e.location AS ev_location,
          (SELECT COUNT(*) FROM post_likes l WHERE l.post_id = p.id) AS like_count,
          (SELECT COUNT(*) FROM post_comments c WHERE c.post_id = p.id AND c.deleted_at IS NULL) AS comment_count,
-         (SELECT COUNT(*) FROM event_rsvps r WHERE r.target_type = 'post' AND r.target_id = p.id) AS rsvp_count,
+         ${rsvpCountSql('post', 'p.id')} AS rsvp_count,
          EXISTS (SELECT 1 FROM post_likes l WHERE l.post_id = p.id AND l.user_id = ?) AS liked_by_me,
          EXISTS (SELECT 1 FROM event_rsvps r WHERE r.target_type = 'post' AND r.target_id = p.id AND r.user_id = ?) AS rsvp_by_me,
          (SELECT json_group_array(json_object('id', g.id, 'slug', g.slug, 'name', g.name, 'privacy', g.privacy))
@@ -146,8 +167,8 @@ export async function postImageUrl(
   scope: 'community' | 'staff',
 ): Promise<string | null> {
   if (!imageKey) return null;
-  const token = await signValue({ k: 'post', p: postId, s: scope }, ctx.config.tokenSecret, IMAGE_TTL_SECONDS);
-  return `/api/community/files/post-image/${postId}?token=${encodeURIComponent(token)}`;
+  const token = await signValue({ k: 'post', p: postId, s: scope }, ctx.config.tokenSecret, IMAGE_TTL_SECONDS, IMAGE_LINK_ALIGN_SECONDS);
+  return `/api/community/files/post-image/${postId}?token=${encodeURIComponent(token)}&v=${imageVersion(imageKey)}`;
 }
 
 /**
@@ -194,6 +215,9 @@ export async function communityPostOut(ctx: Ctx, row: Record<string, unknown>, v
           going: Number(row.rsvp_by_me ?? 0) === 1,
           age21: Number(row.event_age21) === 1,
           attendeesPublic: Number(row.rsvp_list_public) === 1,
+          guestRsvp: Number(row.rsvp_guests) === 1,
+          icons: readIcons(row.event_icons),
+          questions: readQuestions(row.rsvp_questions),
         }
       : null,
     audience: String(row.audience ?? 'everyone') as 'everyone' | 'groups',
@@ -229,7 +253,7 @@ function parseGroups(value: unknown): { id: string; slug: string; name: string; 
   }
 }
 
-export function viewerParams(viewer: AuthContext | null): SqlParam[] {
+export function viewerParams(viewer: Pick<AuthContext, 'userId'> | null): SqlParam[] {
   const id = viewer?.userId ?? '';
   return [id, id];
 }

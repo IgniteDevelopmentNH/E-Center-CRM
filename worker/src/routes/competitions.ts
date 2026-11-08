@@ -3,9 +3,9 @@ import { audit } from '../lib/audit.ts';
 import { optionalWebLink } from '../lib/communityValidate.ts';
 import { badRequest, jsonResponse, notFound, readJson, unauthorized } from '../lib/http.ts';
 import { newId } from '../lib/ids.ts';
-import { signValue, verifyValue } from '../lib/signedToken.ts';
+import { IMAGE_LINK_ALIGN_SECONDS, imageVersion, signValue, verifyValue } from '../lib/signedToken.ts';
 import { nowIso } from '../lib/time.ts';
-import { optionalString, requiredString, requiredTimestamp } from '../lib/validate.ts';
+import { optionalString, positiveInt, requiredString, requiredTimestamp } from '../lib/validate.ts';
 import { requireCommunityViewer, requireEditor, requireStaff } from '../middleware/auth.ts';
 import type { Ctx, Router } from '../router.ts';
 import { storeCommunityUpload } from '../services/communityFiles.ts';
@@ -24,16 +24,44 @@ const IMAGE_TTL_SECONDS = 60 * 60 * 6;
 
 async function imageUrl(ctx: Ctx, id: string, key: unknown, scope: 'staff' | 'community'): Promise<string | null> {
   if (!key) return null;
-  const token = await signValue({ k: 'competition', i: id, s: scope }, ctx.config.tokenSecret, IMAGE_TTL_SECONDS);
-  return `/api/community/files/competition/${id}?token=${encodeURIComponent(token)}`;
+  const token = await signValue({ k: 'competition', i: id, s: scope }, ctx.config.tokenSecret, IMAGE_TTL_SECONDS, IMAGE_LINK_ALIGN_SECONDS);
+  return `/api/community/files/competition/${id}?token=${encodeURIComponent(token)}&v=${imageVersion(key)}`;
+}
+
+interface DeadlineRow {
+  id: string;
+  competition_id: string;
+  label: string;
+  due_at: string;
+}
+
+/** Deadlines for many competitions in one query. */
+async function deadlinesFor(ctx: Ctx, competitionIds: string[]): Promise<Map<string, DeadlineRow[]>> {
+  const byCompetition = new Map<string, DeadlineRow[]>(competitionIds.map((id) => [id, []]));
+  for (let i = 0; i < competitionIds.length; i += 90) {
+    const chunk = competitionIds.slice(i, i + 90);
+    const rows = await ctx.db.all<DeadlineRow>(
+      `SELECT id, competition_id, label, due_at FROM competition_deadlines
+        WHERE competition_id IN (${chunk.map(() => '?').join(', ')}) ORDER BY due_at ASC`,
+      chunk,
+    );
+    for (const row of rows) byCompetition.get(row.competition_id)?.push(row);
+  }
+  return byCompetition;
+}
+
+async function competitionsOut(ctx: Ctx, rows: Record<string, unknown>[], scope: 'staff' | 'community') {
+  const deadlines = await deadlinesFor(ctx, rows.map((row) => String(row.id)));
+  return Promise.all(rows.map((row) => shapeCompetition(ctx, row, deadlines.get(String(row.id)) ?? [], scope)));
 }
 
 export async function competitionOut(ctx: Ctx, row: Record<string, unknown>, scope: 'staff' | 'community') {
+  const deadlines = await deadlinesFor(ctx, [String(row.id)]);
+  return shapeCompetition(ctx, row, deadlines.get(String(row.id)) ?? [], scope);
+}
+
+async function shapeCompetition(ctx: Ctx, row: Record<string, unknown>, deadlines: DeadlineRow[], scope: 'staff' | 'community') {
   const id = String(row.id);
-  const deadlines = await ctx.db.all<{ id: string; label: string; due_at: string }>(
-    `SELECT id, label, due_at FROM competition_deadlines WHERE competition_id = ? ORDER BY due_at ASC`,
-    [id],
-  );
   const now = nowIso();
   const next = deadlines.find((d) => d.due_at >= now) ?? null;
   return {
@@ -54,17 +82,17 @@ export async function competitionOut(ctx: Ctx, row: Record<string, unknown>, sco
 }
 
 /** Published competitions: open ones (by next deadline) first, then past ones. */
-export async function listPublishedCompetitions(ctx: Ctx, customerId: string) {
+export async function listPublishedCompetitions(ctx: Ctx, customerId: string, limit = 100) {
   const rows = await ctx.db.all<Record<string, unknown>>(
     `SELECT c.*,
             (SELECT MIN(d.due_at) FROM competition_deadlines d WHERE d.competition_id = c.id AND d.due_at >= ?) AS next_due
        FROM competitions c
       WHERE c.customer_id = ? AND c.status = 'published' AND c.deleted_at IS NULL
       ORDER BY CASE WHEN next_due IS NULL THEN 1 ELSE 0 END, next_due ASC, c.published_at DESC
-      LIMIT 100`,
-    [nowIso(), customerId],
+      LIMIT ?`,
+    [nowIso(), customerId, limit],
   );
-  return Promise.all(rows.map((row) => competitionOut(ctx, row, 'community')));
+  return competitionsOut(ctx, rows, 'community');
 }
 
 export async function loadPublishedCompetition(ctx: Ctx, customerId: string, id: string) {
@@ -123,7 +151,7 @@ export function register(router: Router): void {
 
   router.get('/api/community/competitions', async (ctx: Ctx) => {
     const { auth } = await requireCommunityViewer(ctx);
-    return jsonResponse({ competitions: await listPublishedCompetitions(ctx, auth.customerId) });
+    return jsonResponse({ competitions: await listPublishedCompetitions(ctx, auth.customerId, positiveInt(ctx.query.get('limit'), 100, 100)) });
   });
 
   router.get('/api/community/competitions/:id', async (ctx: Ctx) => {
@@ -153,7 +181,7 @@ export function register(router: Router): void {
         LIMIT 200`,
       [customerId],
     );
-    return jsonResponse({ competitions: await Promise.all(rows.map((row) => competitionOut(ctx, row, 'staff'))) });
+    return jsonResponse({ competitions: await competitionsOut(ctx, rows, 'staff') });
   });
 
   router.get('/api/admin/competitions/:id', async (ctx: Ctx) => {

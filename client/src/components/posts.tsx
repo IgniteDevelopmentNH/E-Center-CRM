@@ -1,16 +1,26 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { ApiError, api } from '../lib/api.ts';
 import { formatDate, formatRelative, formatTime, toDateTimeInput } from '../lib/format.ts';
-import type { FeedPost, PostComment } from '../lib/types.ts';
+import type { CommunityEventDetail, CompetitionDeadlineItem, FeedPost, PostComment, RegistrationQuestion, RsvpAnswers } from '../lib/types.ts';
 import { useAuth } from '../state/AuthContext.tsx';
 import { useToast } from '../state/ToastContext.tsx';
 import { MemberAvatar, accountTypeLabel } from './community.tsx';
-import { Age21Badge, AttendeesButton, AudienceField, EventOptionFields, GuestVisibilityField } from './eventOptions.tsx';
+import {
+  Age21Badge,
+  AttendeesButton,
+  AudienceField,
+  EventIconRow,
+  EventOptionsFields,
+  GuestVisibilityField,
+  ResponsesButton,
+  eventOptionsFrom,
+  questionsPayload,
+} from './eventOptions.tsx';
 import { MentionTextarea, RichText } from './mentions.tsx';
 import { Modal } from './overlays.tsx';
-import { Checkbox, Field, TextInput } from './ui.tsx';
+import { Checkbox, Field, TextArea, TextInput } from './ui.tsx';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -130,42 +140,217 @@ export function LikeButton({ post, onChange }: { post: FeedPost; onChange: (patc
   );
 }
 
-/** "I'll be there!" toggle for an event post or a community CRM event. */
+const guestTokenKey = (target: string, id: string) => `ecenter-guest-rsvp:${target}:${id}`;
+
+function readGuestToken(target: string, id: string): string | null {
+  try {
+    return localStorage.getItem(guestTokenKey(target, id));
+  } catch {
+    return null;
+  }
+}
+
+function writeGuestToken(target: string, id: string, token: string | null): void {
+  try {
+    if (token) localStorage.setItem(guestTokenKey(target, id), token);
+    else localStorage.removeItem(guestTokenKey(target, id));
+  } catch {
+    /* storage unavailable: the RSVP still counts, it just can't be undone from this browser */
+  }
+}
+
+/** Over-21 confirmation, registration questions, and a guest's name and email. */
+function RsvpDialog({
+  target,
+  id,
+  title,
+  age21,
+  questions,
+  asGuest,
+  editing,
+  onClose,
+  onDone,
+}: {
+  target: 'post' | 'event';
+  id: string;
+  title: string;
+  age21: boolean;
+  questions: RegistrationQuestion[];
+  asGuest: boolean;
+  editing: boolean;
+  onClose: () => void;
+  onDone: (state: { going: boolean; rsvpCount: number; cancelToken?: string | null }) => void;
+}) {
+  const path = target === 'post' ? 'posts' : 'events';
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [website, setWebsite] = useState('');
+  const [over21, setOver21] = useState(editing);
+  const [answers, setAnswers] = useState<RsvpAnswers>({});
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const setAnswer = (questionId: string, value: string | string[]) => setAnswers((current) => ({ ...current, [questionId]: value }));
+
+  useEffect(() => {
+    if (!editing) return;
+    api
+      .get<{ answers: RsvpAnswers }>(`/community/${path}/${id}/rsvp`)
+      .then((response) => setAnswers(response.answers))
+      .catch(() => undefined);
+  }, [editing, path, id]);
+
+  async function submit(event?: FormEvent) {
+    event?.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const body = { going: true, over21: age21 ? over21 : undefined, answers };
+      onDone(
+        asGuest
+          ? await api.post(`/public/${path}/${id}/rsvp`, { ...body, name, email, website })
+          : await api.post(`/community/${path}/${id}/rsvp`, body),
+      );
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : 'Your RSVP did not go through. Please try again.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const choice = (question: RegistrationQuestion, options: string[]) => (
+    <div className="flex flex-wrap gap-2">
+      {options.map((option) => (
+        <label
+          key={option}
+          className={`chip min-h-[40px] cursor-pointer border px-3 ${
+            answers[question.id] === option ? 'border-navy bg-navy text-white' : 'border-slate-300 bg-white text-slate-700'
+          }`}
+        >
+          <input type="radio" name={question.id} className="sr-only" checked={answers[question.id] === option} onChange={() => setAnswer(question.id, option)} />
+          {option}
+        </label>
+      ))}
+    </div>
+  );
+
+  return (
+    <Modal
+      open
+      title={editing ? 'Update your RSVP' : `RSVP: ${title}`}
+      onClose={onClose}
+      footer={
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <button type="button" className="btn-ghost" onClick={onClose} disabled={busy}>Cancel</button>
+          <button type="button" className="btn-primary" onClick={() => submit()} disabled={busy || (age21 && !over21)}>
+            {busy ? 'Saving...' : editing ? 'Save' : "I'll be there!"}
+          </button>
+        </div>
+      }
+    >
+      <form onSubmit={submit} className="space-y-4" noValidate>
+        {asGuest && (
+          <>
+            <Field label="Your name" required>
+              <TextInput value={name} onChange={(e) => setName(e.target.value)} maxLength={120} autoComplete="name" />
+            </Field>
+            <Field label="Email" required hint="Shared with ECenter staff so they can reach you about this event.">
+              <TextInput type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" />
+            </Field>
+            {/* Left empty by people; see the guest RSVP route. */}
+            <div className="absolute -left-[9999px]" aria-hidden="true">
+              <label>
+                Website
+                <input tabIndex={-1} autoComplete="off" value={website} onChange={(e) => setWebsite(e.target.value)} />
+              </label>
+            </div>
+          </>
+        )}
+        {questions.map((question) => (
+          <fieldset key={question.id}>
+            <legend className="label">
+              {question.label}
+              {question.required && <span className="ml-0.5 text-urgent">*</span>}
+            </legend>
+            {question.type === 'yesno' && choice(question, ['Yes', 'No'])}
+            {question.type === 'choice' && choice(question, question.options)}
+            {question.type === 'checkboxes' &&
+              question.options.map((option) => {
+                const picked = (answers[question.id] as string[] | undefined) ?? [];
+                return (
+                  <Checkbox
+                    key={option}
+                    label={option}
+                    checked={picked.includes(option)}
+                    onChange={(on) => setAnswer(question.id, on ? [...picked, option] : picked.filter((v) => v !== option))}
+                  />
+                );
+              })}
+            {question.type === 'text' && (
+              <TextArea rows={2} maxLength={1000} aria-label={question.label} value={(answers[question.id] as string | undefined) ?? ''} onChange={(e) => setAnswer(question.id, e.target.value)} />
+            )}
+          </fieldset>
+        ))}
+        {age21 && (
+          <div>
+            <p className="text-sm text-slate-600">The organiser has marked this event 21 and over.</p>
+            <Checkbox label="I'm over 21" checked={over21} onChange={setOver21} />
+          </div>
+        )}
+        {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm font-semibold text-urgent" role="alert">{error}</p>}
+      </form>
+    </Modal>
+  );
+}
+
+/** "I'll be there!" for an event post or a community CRM event, for members and (if allowed) guests. */
 export function RsvpButton({
   target,
   id,
+  title,
   going,
   count,
   age21 = false,
+  guestRsvp = false,
+  questions = [],
   showAttendees = false,
+  showResponses = false,
   onChange,
 }: {
   target: 'post' | 'event';
   id: string;
+  title: string;
   going: boolean;
   count: number;
-  /** 21+ event: saying "I'll be there!" asks the person to confirm they are over 21. */
   age21?: boolean;
+  guestRsvp?: boolean;
+  questions?: RegistrationQuestion[];
   /** The organiser shared the list (or the viewer organised it / is staff). */
   showAttendees?: boolean;
+  /** The viewer organised this event or is staff, and can see everyone's answers. */
+  showResponses?: boolean;
   onChange: (state: { going: boolean; rsvpCount: number }) => void;
 }) {
   const { user, isActiveMember } = useAuth();
   const toast = useToast();
   const [busy, setBusy] = useState(false);
-  const [confirming, setConfirming] = useState(false);
-  const [over21, setOver21] = useState(false);
+  const [dialog, setDialog] = useState<null | 'new' | 'edit'>(null);
+  const [guestToken, setGuestToken] = useState(() => readGuestToken(target, id));
+  const isGuest = !user;
+  const guestGoing = isGuest && !!guestToken;
+  const isGoing = going || guestGoing;
+  const path = target === 'post' ? 'posts' : 'events';
+  const canRsvp = isActiveMember || (isGuest && guestRsvp);
 
-  async function send(next: boolean) {
+  async function cancel() {
     setBusy(true);
     try {
-      onChange(
-        await api.post<{ going: boolean; rsvpCount: number }>(`/community/${target === 'post' ? 'posts' : 'events'}/${id}/rsvp`, {
-          going: next,
-          over21: next && age21 ? true : undefined,
-        }),
-      );
-      setConfirming(false);
+      if (isGuest) {
+        onChange(await api.post<{ going: boolean; rsvpCount: number }>('/public/rsvp/cancel', { token: guestToken }));
+        writeGuestToken(target, id, null);
+        setGuestToken(null);
+      } else {
+        onChange(await api.post<{ going: boolean; rsvpCount: number }>(`/community/${path}/${id}/rsvp`, { going: false }));
+      }
     } catch (caught) {
       toast.error(caught instanceof ApiError ? caught.message : 'That did not work.');
     } finally {
@@ -173,24 +358,30 @@ export function RsvpButton({
     }
   }
 
-  function toggle() {
-    if (!going && age21) {
-      setOver21(false);
-      setConfirming(true);
+  async function join() {
+    if (isGuest || age21 || questions.length) {
+      setDialog('new');
       return;
     }
-    void send(!going);
+    setBusy(true);
+    try {
+      onChange(await api.post<{ going: boolean; rsvpCount: number }>(`/community/${path}/${id}/rsvp`, { going: true }));
+    } catch (caught) {
+      toast.error(caught instanceof ApiError ? caught.message : 'That did not work.');
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-3">
-      {isActiveMember && (
-        <button type="button" onClick={toggle} disabled={busy} aria-pressed={going} className={going ? 'btn-secondary' : 'btn-primary'}>
-          {going ? "✓ You're going" : "I'll be there!"}
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+      {canRsvp && (
+        <button type="button" onClick={isGoing ? cancel : join} disabled={busy} aria-pressed={isGoing} className={isGoing ? 'btn-secondary' : 'btn-primary'}>
+          {isGoing ? "✓ You're going" : "I'll be there!"}
         </button>
       )}
-      {!user && (
-        <Link to="/login" className="btn-primary">
+      {isGuest && !guestRsvp && (
+        <Link to={`/login?next=${encodeURIComponent(target === 'post' ? `/posts/${id}` : `/events/${id}`)}`} className="btn-primary">
           Sign in to RSVP
         </Link>
       )}
@@ -199,38 +390,46 @@ export function RsvpButton({
         {count === 0 ? 'Be the first to say you’re going' : `${count} ${count === 1 ? 'person' : 'people'} going`}
       </span>
       {showAttendees && !!user && <AttendeesButton target={target} id={id} count={count} />}
-      {going && (
-        <span className="w-full text-xs text-slate-500">Changed your mind? Tap the button again to remove your RSVP.</span>
-      )}
-      <Modal
-        open={confirming}
-        title="This is a 21+ event"
-        onClose={() => setConfirming(false)}
-        width="max-w-md"
-        footer={
-          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-            <button type="button" className="btn-ghost" onClick={() => setConfirming(false)} disabled={busy}>Cancel</button>
-            <button type="button" className="btn-primary" onClick={() => send(true)} disabled={busy || !over21}>
-              {busy ? 'Saving...' : "I'll be there!"}
+      {showResponses && <ResponsesButton target={target} id={id} title={title} />}
+      {isGoing && (
+        <span className="w-full text-xs text-slate-500">
+          Changed your mind? Tap the button again to remove your RSVP.
+          {going && !isGuest && questions.length > 0 && (
+            <button type="button" className="ml-1 font-semibold text-teal-700 hover:underline" onClick={() => setDialog('edit')}>
+              Change my answers
             </button>
-          </div>
-        }
-      >
-        <p className="text-sm text-slate-600">The organiser has marked this event 21 and over.</p>
-        <div className="mt-3">
-          <Checkbox label="I'm over 21" checked={over21} onChange={setOver21} />
-        </div>
-      </Modal>
+          )}
+        </span>
+      )}
+      {dialog && (
+        <RsvpDialog
+          target={target}
+          id={id}
+          title={title}
+          age21={age21}
+          questions={questions}
+          asGuest={isGuest}
+          editing={dialog === 'edit'}
+          onClose={() => setDialog(null)}
+          onDone={(state) => {
+            setDialog(null);
+            if (state.cancelToken) {
+              writeGuestToken(target, id, state.cancelToken);
+              setGuestToken(state.cancelToken);
+            }
+            onChange({ going: state.going, rsvpCount: state.rsvpCount });
+          }}
+        />
+      )}
     </div>
   );
 }
 
-/** Group and 21+ markers shown on a post. */
+/** Group markers shown on an event. */
 export function PostBadges({ post }: { post: FeedPost }) {
-  if (!post.groups.length && !post.event?.age21) return null;
+  if (!post.groups.length) return null;
   return (
     <div className="mt-2 flex flex-wrap gap-1.5">
-      {post.event?.age21 && <Age21Badge />}
       {post.groups.map((group) => (
         <Link key={group.id} to={`/groups/${group.slug}`} className="chip bg-teal-50 text-teal-800 hover:underline">
           {group.name}
@@ -246,73 +445,67 @@ const LONG_POST = 420;
 
 export function PostCard({ post, onChange }: { post: FeedPost; onChange: (patch: Partial<FeedPost>) => void }) {
   const long = post.body.length > LONG_POST;
+  const { event } = post;
   return (
     <article className="card overflow-hidden" aria-labelledby={`post-${post.id}`}>
-      <div className="p-4 sm:p-6">
-        <PostAuthor post={post} />
+      {post.imageUrl && (
+        <Link to={`/posts/${post.id}`} tabIndex={-1} aria-hidden="true">
+          <img src={post.imageUrl} alt="" className="max-h-[320px] w-full border-b border-slate-100 object-cover" loading="lazy" />
+        </Link>
+      )}
+      <div className="space-y-3 p-4 sm:p-6">
+        <div className="flex items-start gap-3">
+          {event && <DateBadge iso={event.startsAt} size="lg" />}
+          <div className="min-w-0">
+            <h2 id={`post-${post.id}`} className="text-lg font-bold leading-snug text-navy-800 sm:text-xl">
+              <Link to={`/posts/${post.id}`} className="hover:underline">
+                {post.title}
+              </Link>
+            </h2>
+            {event && (
+              <p className="mt-0.5 text-sm text-slate-600">
+                {eventWhen(event.startsAt, event.endsAt)}
+                {event.location ? ` · ${event.location}` : ''}
+              </p>
+            )}
+          </div>
+        </div>
+        {event && <EventIconRow icons={event.icons} />}
         <PostBadges post={post} />
-        <h2 id={`post-${post.id}`} className="mt-3 text-lg font-bold text-navy-800 sm:text-xl">
-          <Link to={`/posts/${post.id}`} className="hover:underline">
-            {post.title}
-          </Link>
-        </h2>
-        <div className={long ? 'relative max-h-48 overflow-hidden' : ''}>
-          <RichText text={post.body} className="mt-2 text-[15px] leading-relaxed text-slate-700" />
+        <div className={long ? 'relative max-h-40 overflow-hidden' : ''}>
+          <RichText text={post.body} className="text-[15px] leading-relaxed text-slate-700" />
           {long && <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-white" aria-hidden="true" />}
         </div>
         {long && (
-          <Link to={`/posts/${post.id}`} className="mt-1 inline-block text-sm font-semibold text-teal-700 hover:underline">
+          <Link to={`/posts/${post.id}`} className="inline-block text-sm font-semibold text-teal-700 hover:underline">
             Read more
           </Link>
         )}
+        {post.linkUrl && (
+          <a href={post.linkUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-[44px] items-center gap-1.5 text-sm font-semibold text-teal-700 hover:underline">
+            {hostOf(post.linkUrl)} <span aria-hidden="true">↗</span>
+            <span className="sr-only">(opens in a new tab)</span>
+          </a>
+        )}
+        {event?.rsvpEnabled && post.status === 'published' && (
+          <RsvpButton
+            target="post"
+            id={post.id}
+            title={post.title}
+            going={event.going}
+            count={event.rsvpCount}
+            age21={event.age21}
+            guestRsvp={event.guestRsvp}
+            questions={event.questions}
+            showAttendees={event.attendeesPublic || post.canEdit}
+            onChange={(state) => onChange({ event: { ...event, going: state.going, rsvpCount: state.rsvpCount } })}
+          />
+        )}
+        {event?.age21 && !event.rsvpEnabled && <Age21Badge />}
+        <PostAuthor post={post} />
       </div>
 
-      {post.imageUrl && (
-        <Link to={`/posts/${post.id}`} tabIndex={-1} aria-hidden="true">
-          <img src={post.imageUrl} alt="" className="max-h-[420px] w-full border-y border-slate-100 object-cover" loading="lazy" />
-        </Link>
-      )}
-
-      {(post.event || post.linkedEvent || post.linkUrl) && (
-        <div className="space-y-3 px-4 pt-4 sm:px-6">
-          {post.event && (
-            <Link to={`/posts/${post.id}`} className="flex items-center gap-3 rounded-lg border border-slate-200 p-3 hover:border-teal-200">
-              <DateBadge iso={post.event.startsAt} />
-              <span className="min-w-0">
-                <span className="block text-xs font-bold uppercase tracking-wide text-teal-700">Event</span>
-                <span className="block truncate text-sm text-slate-700">{eventWhen(post.event.startsAt, post.event.endsAt)}</span>
-                {post.event.location && <span className="block truncate text-xs text-slate-500">{post.event.location}</span>}
-                {post.event.rsvpEnabled && (
-                  <span className="mt-0.5 block text-xs font-semibold text-teal-700">
-                    {post.event.going ? "✓ You're going" : `${post.event.rsvpCount} going · View details`}
-                  </span>
-                )}
-              </span>
-            </Link>
-          )}
-          {post.linkedEvent && (
-            <Link to={`/events/${post.linkedEvent.id}`} className="flex items-center gap-3 rounded-lg border border-slate-200 p-3 hover:border-teal-200">
-              <DateBadge iso={post.linkedEvent.startsAt} />
-              <span className="min-w-0">
-                <span className="block text-xs font-bold uppercase tracking-wide text-teal-700">Event</span>
-                <span className="block truncate font-semibold text-navy-800">{post.linkedEvent.name}</span>
-                <span className="block truncate text-xs text-slate-500">
-                  {eventWhen(post.linkedEvent.startsAt, post.linkedEvent.endsAt)}
-                  {post.linkedEvent.location ? ` · ${post.linkedEvent.location}` : ''}
-                </span>
-              </span>
-            </Link>
-          )}
-          {post.linkUrl && (
-            <a href={post.linkUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-[44px] items-center gap-1.5 text-sm font-semibold text-teal-700 hover:underline">
-              {hostOf(post.linkUrl)} <span aria-hidden="true">↗</span>
-              <span className="sr-only">(opens in a new tab)</span>
-            </a>
-          )}
-        </div>
-      )}
-
-      <footer className="mt-2 flex items-center gap-1 border-t border-slate-100 px-2 py-1 sm:px-4">
+      <footer className="flex items-center gap-1 border-t border-slate-100 px-2 py-1 sm:px-4">
         <LikeButton post={post} onChange={onChange} />
         <Link
           to={`/posts/${post.id}#comments`}
@@ -324,6 +517,66 @@ export function PostCard({ post, onChange }: { post: FeedPost; onChange: (patch:
           {post.commentCount > 0 ? `${post.commentCount} ${post.commentCount === 1 ? 'comment' : 'comments'}` : 'Comment'}
         </Link>
       </footer>
+    </article>
+  );
+}
+
+/** An ECenter event from the CRM, in the feed. */
+export function CrmEventCard({ event, onChange }: { event: CommunityEventDetail; onChange: (patch: Partial<CommunityEventDetail>) => void }) {
+  const { isStaff } = useAuth();
+  return (
+    <article className="card overflow-hidden" aria-labelledby={`event-${event.id}`}>
+      <div className="h-1.5 bg-teal" aria-hidden="true" />
+      <div className="space-y-3 p-4 sm:p-6">
+        <div className="flex items-start gap-3">
+          <DateBadge iso={event.startsAt} size="lg" />
+          <div className="min-w-0">
+            <p className="text-xs font-bold uppercase tracking-wide text-teal-700">UNH ECenter event</p>
+            <h2 id={`event-${event.id}`} className="text-lg font-bold leading-snug text-navy-800 sm:text-xl">
+              <Link to={`/events/${event.id}`} className="hover:underline">{event.name}</Link>
+            </h2>
+            <p className="mt-0.5 text-sm text-slate-600">
+              {eventWhen(event.startsAt, event.endsAt)}
+              {event.location ? ` · ${event.location}` : ''}
+            </p>
+          </div>
+        </div>
+        <EventIconRow icons={event.icons} />
+        {event.details && <p className="line-clamp-4 whitespace-pre-line text-[15px] leading-relaxed text-slate-700">{event.details}</p>}
+        {event.rsvpEnabled && (
+          <RsvpButton
+            target="event"
+            id={event.id}
+            title={event.name}
+            going={event.going}
+            count={event.rsvpCount}
+            age21={event.age21}
+            guestRsvp={event.guestRsvp}
+            questions={event.questions}
+            showAttendees={event.attendeesPublic || isStaff}
+            onChange={(state) => onChange({ going: state.going, rsvpCount: state.rsvpCount })}
+          />
+        )}
+      </div>
+    </article>
+  );
+}
+
+/** A competition deadline, in the feed. */
+export function DeadlineCard({ deadline }: { deadline: CompetitionDeadlineItem }) {
+  return (
+    <article className="card flex items-center gap-3 border-l-4 border-l-amber-400 p-4 sm:px-6">
+      <DateBadge iso={deadline.dueAt} size="lg" />
+      <div className="min-w-0">
+        <p className="text-xs font-bold uppercase tracking-wide text-amber-700">Competition deadline</p>
+        <h2 className="font-bold leading-snug text-navy-800">
+          <Link to={`/competitions/${deadline.competitionId}`} className="hover:underline">{deadline.title}</Link>
+        </h2>
+        <p className="text-sm text-slate-600">
+          {deadline.label} · {formatDate(deadline.dueAt)} at {formatTime(deadline.dueAt)}
+        </p>
+        {deadline.prize && <p className="text-sm font-semibold text-teal-800">Prize: {deadline.prize}</p>}
+      </div>
     </article>
   );
 }
@@ -503,7 +756,7 @@ function CommentComposer({
 
 /* ------------------------------------------------------------- editor -- */
 
-/** Create or edit a member's own post (title, body with @mentions, link, image, optional event). */
+/** Create or edit a member's own event. Posts from before the feed became events-only stay editable as they are. */
 export function MemberPostEditor({
   post,
   needsApproval,
@@ -524,12 +777,10 @@ export function MemberPostEditor({
   const [title, setTitle] = useState(post?.title ?? '');
   const [body, setBody] = useState(post?.body ?? '');
   const [linkUrl, setLinkUrl] = useState(post?.linkUrl ?? '');
-  const [isEvent, setIsEvent] = useState(!!post?.event);
+  const isEvent = !post || !!post.event;
   const [startsAt, setStartsAt] = useState(toDateTimeInput(post?.event?.startsAt ?? null));
   const [location, setLocation] = useState(post?.event?.location ?? '');
-  const [rsvpEnabled, setRsvpEnabled] = useState(post?.event?.rsvpEnabled ?? true);
-  const [age21, setAge21] = useState(post?.event?.age21 ?? false);
-  const [attendeesPublic, setAttendeesPublic] = useState(post?.event?.attendeesPublic ?? false);
+  const [options, setOptions] = useState(() => eventOptionsFrom(post?.event));
   const [guestVisible, setGuestVisible] = useState(post?.guestVisible ?? true);
   const [audience, setAudience] = useState<'everyone' | 'groups'>(post?.audience ?? defaultAudience);
   const [groupIds, setGroupIds] = useState<string[]>(post?.groups.map((g) => g.id) ?? defaultGroupIds);
@@ -552,9 +803,12 @@ export function MemberPostEditor({
         isEvent,
         eventStartsAt: isEvent && startsAt ? new Date(startsAt).toISOString() : null,
         eventLocation: isEvent ? location : null,
-        rsvpEnabled: isEvent && rsvpEnabled,
-        eventAge21: isEvent && age21,
-        rsvpListPublic: isEvent && rsvpEnabled && attendeesPublic,
+        rsvpEnabled: isEvent && options.rsvpMode !== 'off',
+        rsvpGuests: isEvent && options.rsvpMode === 'everyone',
+        eventAge21: isEvent && options.age21,
+        rsvpListPublic: isEvent && options.attendeesPublic,
+        eventIcons: options.icons,
+        rsvpQuestions: questionsPayload(options.questions),
         guestVisible,
         audience,
         groupIds: audience === 'groups' ? groupIds : [],
@@ -570,7 +824,7 @@ export function MemberPostEditor({
       } else if (removeImage && post?.imageUrl) {
         saved = (await api.delete<{ post: FeedPost }>(`/community/posts/${saved.id}/image`)).post;
       }
-      toast.success(saved.status === 'pending' ? 'Sent to the ECenter for approval.' : 'Posted to the feed.');
+      toast.success(saved.status === 'pending' ? 'Sent to the ECenter for approval.' : 'Added to the feed.');
       onSaved(saved);
     } catch (caught) {
       setError(caught instanceof ApiError ? { message: caught.message, field: caught.field } : { message: 'Could not save the post.' });
@@ -582,14 +836,14 @@ export function MemberPostEditor({
   return (
     <Modal
       open
-      title={post ? 'Edit post' : 'New post'}
+      title={post ? (isEvent ? 'Edit event' : 'Edit post') : 'New event'}
       onClose={onClose}
       width="max-w-2xl"
       footer={
         <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
           <button type="button" className="btn-ghost" onClick={onClose} disabled={busy}>Cancel</button>
           <button type="button" className="btn-primary" onClick={() => save()} disabled={busy}>
-            {busy ? 'Saving...' : needsApproval ? 'Submit for approval' : post ? 'Save changes' : 'Post'}
+            {busy ? 'Saving...' : needsApproval ? 'Submit for approval' : post ? 'Save changes' : 'Add event'}
           </button>
         </div>
       }
@@ -598,41 +852,33 @@ export function MemberPostEditor({
         {needsApproval && (
           <p className="rounded-lg bg-teal-50 px-3 py-2 text-sm text-teal-800">
             {post?.status === 'published'
-              ? 'Edits go back to the ECenter for approval. Your post is hidden until they approve it.'
-              : 'The ECenter reviews posts before they appear in the feed.'}
+              ? 'Edits go back to the ECenter for approval. Your event is hidden until they approve it.'
+              : 'The ECenter reviews events before they appear in the feed.'}
           </p>
         )}
-        <Field label="Title" required error={errorFor('Title')}>
+        <Field label={isEvent ? 'Event name' : 'Title'} required error={errorFor('Title')}>
           <TextInput value={title} onChange={(e) => setTitle(e.target.value)} maxLength={200} invalid={!!errorFor('Title')} />
         </Field>
-        <Field label="Post" required error={errorFor('Body')}>
+        {isEvent && (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Field label="Date & time" required error={errorFor('Event start')}>
+              <TextInput type="datetime-local" value={startsAt} onChange={(e) => setStartsAt(e.target.value)} invalid={!!errorFor('Event start')} />
+            </Field>
+            <Field label="Location" error={errorFor('Event location')}>
+              <TextInput value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Room, building or online link" />
+            </Field>
+          </div>
+        )}
+        <Field label={isEvent ? 'Details' : 'Post'} required error={errorFor('Body')}>
           <MentionTextarea id="post-body" value={body} onChange={setBody} rows={6} maxLength={10000} invalid={!!errorFor('Body')} />
         </Field>
         <Field label="Link" error={errorFor('Link')} hint="Optional.">
           <TextInput type="url" value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} placeholder="https://" invalid={!!errorFor('Link')} />
         </Field>
 
-        <div>
-          <Checkbox label="This is an event" checked={isEvent} onChange={setIsEvent} />
-          {isEvent && (
-            <div className="mt-2 space-y-3 rounded-lg border border-slate-200 p-3">
-              <Field label="Date & time" required error={errorFor('Event start')}>
-                <TextInput type="datetime-local" value={startsAt} onChange={(e) => setStartsAt(e.target.value)} invalid={!!errorFor('Event start')} />
-              </Field>
-              <Field label="Location" error={errorFor('Event location')}>
-                <TextInput value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Room, building or online link" />
-              </Field>
-              <Checkbox label={'Let people say "I\'ll be there!"'} checked={rsvpEnabled} onChange={setRsvpEnabled} />
-              <EventOptionFields
-                rsvpEnabled={rsvpEnabled}
-                age21={age21}
-                onAge21={setAge21}
-                attendeesPublic={attendeesPublic}
-                onAttendeesPublic={setAttendeesPublic}
-              />
-            </div>
-          )}
-        </div>
+        {isEvent && (
+          <EventOptionsFields value={options} onChange={setOptions} guestVisible={guestVisible && audience === 'everyone'} errorFor={errorFor} />
+        )}
 
         <AudienceField audience={audience} onAudience={setAudience} groupIds={groupIds} onGroupIds={setGroupIds} error={errorFor('Groups')} />
         {audience === 'everyone' && <GuestVisibilityField value={guestVisible} onChange={setGuestVisible} />}

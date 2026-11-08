@@ -13,7 +13,7 @@ export function MemberProfilePage() {
   const { user } = useAuth();
   const { data, loading, error, reload } = useApi<{ member: PublicMember }>(id ? `/community/members/${id}` : null);
 
-  if (loading) return <LoadingBlock label="Loading profile" />;
+  if (loading && !data) return <LoadingBlock label="Loading profile" />;
   if (error || !data) {
     return (
       <div className="mx-auto max-w-xl space-y-4">

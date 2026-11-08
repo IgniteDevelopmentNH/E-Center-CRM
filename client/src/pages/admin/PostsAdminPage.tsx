@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { Combobox } from '../../components/Combobox.tsx';
-import { AudienceField, EventOptionFields, GuestVisibilityField } from '../../components/eventOptions.tsx';
+import { AudienceField, EventOptionsFields, GuestVisibilityField, ResponsesButton, eventOptionsFrom, questionsPayload } from '../../components/eventOptions.tsx';
 import { MentionTextarea, plainText } from '../../components/mentions.tsx';
 import { ConfirmDialog, Modal } from '../../components/overlays.tsx';
 import { Checkbox, Chip, EmptyState, ErrorBlock, Field, LoadingBlock, Pagination, TextArea, TextInput } from '../../components/ui.tsx';
@@ -21,7 +21,7 @@ const STATUS: Record<AdminPost['status'], { label: string; tone: Tone }> = {
   archived: { label: 'Archived', tone: 'slate' },
 };
 const FILTERS = [
-  { value: 'all', label: 'All posts' },
+  { value: 'all', label: 'All' },
   { value: 'pending', label: 'Awaiting approval' },
   { value: 'draft', label: 'Drafts' },
   { value: 'published', label: 'Published' },
@@ -45,7 +45,6 @@ export function PostsAdminPage() {
   const [editing, setEditing] = useState<AdminPost | 'new' | null>(null);
   const [confirm, setConfirm] = useState<{ post: AdminPost; action: 'archive' | 'delete' | 'notify' } | null>(null);
   const [rejecting, setRejecting] = useState<AdminPost | null>(null);
-  const [rsvpFor, setRsvpFor] = useState<AdminPost | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const { data, loading, error, reload } = useApi<ListResponse>(`/admin/posts${buildQuery({ status, page, limit: 20 })}`);
 
@@ -75,14 +74,14 @@ export function PostsAdminPage() {
     <div>
       <header className="mb-5 flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-navy-800">Posts</h1>
+          <h1 className="text-2xl font-bold text-navy-800">Feed events</h1>
           <p className="mt-0.5 text-sm text-slate-500">
-            News, events and member posts for the community feed. Only published posts are visible to students and mentors.
+            Events for the community feed, from staff and members. Only published events are visible to students and mentors.
           </p>
         </div>
         {canEdit && (
           <button type="button" className="btn-primary" onClick={() => setEditing('new')}>
-            + New post
+            + New event
           </button>
         )}
       </header>
@@ -93,7 +92,7 @@ export function PostsAdminPage() {
           onClick={() => { setStatus('pending'); setPage(1); }}
           className="mb-4 flex w-full items-center gap-2 rounded-lg bg-amber-50 px-4 py-3 text-left text-sm font-semibold text-amber-800 hover:bg-amber-100"
         >
-          {data.pendingCount} {data.pendingCount === 1 ? 'member post is' : 'member posts are'} waiting for approval →
+          {data.pendingCount} {data.pendingCount === 1 ? 'member event is' : 'member events are'} waiting for approval →
         </button>
       )}
 
@@ -122,8 +121,8 @@ export function PostsAdminPage() {
       {error && <ErrorBlock message={error} onRetry={reload} />}
       {data && data.posts.length === 0 && (
         <EmptyState
-          title={status === 'pending' ? 'Nothing waiting for approval' : 'No posts here yet'}
-          message={status === 'pending' ? 'Member posts that need review will appear here.' : 'Write a post to share news, programs and events with students and mentors.'}
+          title={status === 'pending' ? 'Nothing waiting for approval' : 'Nothing here yet'}
+          message={status === 'pending' ? 'Member events that need review will appear here.' : 'Add an event to share it with students and mentors.'}
           icon="▤"
         />
       )}
@@ -153,9 +152,7 @@ export function PostsAdminPage() {
                     {post.eventDetails?.rsvpEnabled && (
                       <>
                         {' · '}
-                        <button type="button" className="font-semibold text-teal-700 hover:underline" onClick={() => setRsvpFor(post)}>
-                          {post.rsvpCount} going
-                        </button>
+                        {post.rsvpCount} going <ResponsesButton target="post" id={post.id} title={post.title} />
                       </>
                     )}
                     {post.notifiedAt && ` · Emailed to members ${formatDate(post.notifiedAt)}`}
@@ -264,7 +261,6 @@ export function PostsAdminPage() {
         />
       )}
 
-      {rsvpFor && <RsvpList post={rsvpFor} onClose={() => setRsvpFor(null)} />}
     </div>
   );
 }
@@ -288,38 +284,22 @@ function RejectDialog({ post, busy, onCancel, onReject }: { post: AdminPost; bus
   );
 }
 
-function RsvpList({ post, onClose }: { post: AdminPost; onClose: () => void }) {
-  const { data, loading } = useApi<{ rsvps: { name: string; accountType: string }[] }>(`/admin/posts/${post.id}`);
-  return (
-    <Modal open title={`Going: ${post.title}`} onClose={onClose} width="max-w-md">
-      {loading && <LoadingBlock label="Loading" />}
-      {data && data.rsvps.length === 0 && <p className="text-sm text-slate-500">No one has said they're going yet.</p>}
-      <ul className="divide-y divide-slate-100">
-        {data?.rsvps.map((r, i) => (
-          <li key={i} className="flex items-center justify-between py-2 text-sm">
-            <span className="font-semibold text-navy-800">{r.name}</span>
-            <span className="text-xs text-slate-500">{humanise(r.accountType ?? '')}</span>
-          </li>
-        ))}
-      </ul>
-    </Modal>
-  );
-}
-
 type EventMode = 'none' | 'linked' | 'own';
+
+const eventModeOf = (post: AdminPost | null): EventMode =>
+  !post || post.eventDetails ? 'own' : post.eventId ? 'linked' : 'none';
 
 function PostEditor({ post, onClose, onSaved }: { post: AdminPost | null; onClose: () => void; onSaved: () => void }) {
   const toast = useToast();
   const [title, setTitle] = useState(post?.title ?? '');
   const [body, setBody] = useState(post?.body ?? '');
   const [linkUrl, setLinkUrl] = useState(post?.linkUrl ?? '');
-  const [mode, setMode] = useState<EventMode>(post?.eventDetails ? 'own' : post?.eventId ? 'linked' : 'none');
+  // New items are always events; older posts keep the shape they were written in.
+  const mode = eventModeOf(post);
   const [eventId, setEventId] = useState(post?.eventId ?? '');
   const [startsAt, setStartsAt] = useState(toDateTimeInput(post?.eventDetails?.startsAt ?? null));
   const [location, setLocation] = useState(post?.eventDetails?.location ?? '');
-  const [rsvpEnabled, setRsvpEnabled] = useState(post?.eventDetails?.rsvpEnabled ?? true);
-  const [age21, setAge21] = useState(post?.eventDetails?.age21 ?? false);
-  const [attendeesPublic, setAttendeesPublic] = useState(post?.eventDetails?.attendeesPublic ?? false);
+  const [options, setOptions] = useState(() => eventOptionsFrom(post?.eventDetails));
   const [guestVisible, setGuestVisible] = useState(post?.guestVisible ?? true);
   const [audience, setAudience] = useState<'everyone' | 'groups'>(post?.audience ?? 'everyone');
   const [groupIds, setGroupIds] = useState<string[]>(post?.groups.map((g) => g.id) ?? []);
@@ -350,9 +330,12 @@ function PostEditor({ post, onClose, onSaved }: { post: AdminPost | null; onClos
         isEvent: mode === 'own',
         eventStartsAt: mode === 'own' && startsAt ? new Date(startsAt).toISOString() : null,
         eventLocation: mode === 'own' ? location : null,
-        rsvpEnabled: mode === 'own' && rsvpEnabled,
-        eventAge21: mode === 'own' && age21,
-        rsvpListPublic: mode === 'own' && rsvpEnabled && attendeesPublic,
+        rsvpEnabled: mode === 'own' && options.rsvpMode !== 'off',
+        rsvpGuests: mode === 'own' && options.rsvpMode === 'everyone',
+        eventAge21: mode === 'own' && options.age21,
+        rsvpListPublic: mode === 'own' && options.attendeesPublic,
+        eventIcons: options.icons,
+        rsvpQuestions: questionsPayload(options.questions),
         guestVisible,
         audience,
         groupIds: audience === 'groups' ? groupIds : [],
@@ -390,13 +373,13 @@ function PostEditor({ post, onClose, onSaved }: { post: AdminPost | null; onClos
   return (
     <Modal
       open
-      title={post ? (post.authorKind === 'member' ? `Edit ${post.authorName ?? 'member'}'s post` : 'Edit post') : 'New post'}
+      title={post ? (post.authorKind === 'member' ? `Edit ${post.authorName ?? 'member'}'s event` : 'Edit event') : 'New event'}
       onClose={onClose}
       width="max-w-2xl"
       footer={
         <div className="flex flex-col gap-3">
           {canNotify && (
-            <Checkbox label="Email members about this post when it's published" checked={notify} onChange={setNotify} />
+            <Checkbox label="Email members about this event when it's published" checked={notify} onChange={setNotify} />
           )}
           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
             <button type="button" className="btn-ghost" onClick={onClose} disabled={busy}>Cancel</button>
@@ -418,60 +401,34 @@ function PostEditor({ post, onClose, onSaved }: { post: AdminPost | null; onClos
             Your edits are logged in Settings &gt; Content history, along with the original text.
           </p>
         )}
-        <Field label="Title" required error={errorFor('Title')}>
+        <Field label={mode === 'none' ? 'Title' : 'Event name'} required error={errorFor('Title')}>
           <TextInput value={title} onChange={(e) => setTitle(e.target.value)} maxLength={200} autoFocus invalid={!!errorFor('Title')} />
         </Field>
-        <Field label="Body" required error={errorFor('Body')} hint="Plain text. Leave a blank line between paragraphs.">
+        <Field label="Details" required error={errorFor('Body')} hint="Plain text. Leave a blank line between paragraphs.">
           <MentionTextarea id="admin-post-body" value={body} onChange={setBody} rows={8} maxLength={10000} invalid={!!errorFor('Body')} />
         </Field>
-        <Field label="Link" error={errorFor('Link')} hint="Optional. Shown under the post.">
+        <Field label="Link" error={errorFor('Link')} hint="Optional. Shown with the event.">
           <TextInput type="url" value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} placeholder="https://" invalid={!!errorFor('Link')} />
         </Field>
 
-        <fieldset>
-          <legend className="label">Event</legend>
-          <div className="flex flex-wrap gap-2" role="radiogroup">
-            {([
-              ['none', 'Not an event'],
-              ['own', 'This post is an event'],
-              ['linked', 'Link an ECenter event'],
-            ] as const).map(([value, label]) => (
-              <label
-                key={value}
-                className={`chip min-h-[36px] cursor-pointer border px-3 ${mode === value ? 'border-navy bg-navy text-white' : 'border-slate-300 bg-white text-slate-600'}`}
-              >
-                <input type="radio" name="event-mode" className="sr-only" checked={mode === value} onChange={() => setMode(value)} />
-                {label}
-              </label>
-            ))}
-          </div>
-          {mode === 'own' && (
-            <div className="mt-3 space-y-3 rounded-lg border border-slate-200 p-3">
+        {mode === 'own' && (
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field label="Date & time" required error={errorFor('Event start')}>
                 <TextInput type="datetime-local" value={startsAt} onChange={(e) => setStartsAt(e.target.value)} invalid={!!errorFor('Event start')} />
               </Field>
               <Field label="Location">
                 <TextInput value={location} onChange={(e) => setLocation(e.target.value)} />
               </Field>
-              <Checkbox label={'Let members say "I\'ll be there!"'} checked={rsvpEnabled} onChange={setRsvpEnabled} />
-              <EventOptionFields
-                rsvpEnabled={rsvpEnabled}
-                age21={age21}
-                onAge21={setAge21}
-                attendeesPublic={attendeesPublic}
-                onAttendeesPublic={setAttendeesPublic}
-              />
-              <p className="text-xs text-slate-500">Shows in the feed and in Upcoming events.</p>
             </div>
-          )}
-          {mode === 'linked' && (
-            <div className="mt-3">
-              <Field label="ECenter event" error={errorFor('Event')} hint="Only events marked “Show in the community portal” are listed.">
-                <Combobox value={eventId} options={eventOptions} placeholder="Search events" onChange={setEventId} />
-              </Field>
-            </div>
-          )}
-        </fieldset>
+            <EventOptionsFields value={options} onChange={setOptions} guestVisible={guestVisible && audience === 'everyone'} errorFor={errorFor} />
+          </div>
+        )}
+        {mode === 'linked' && (
+          <Field label="ECenter event" error={errorFor('Event')} hint="Only events marked “Show in the community portal” are listed.">
+            <Combobox value={eventId} options={eventOptions} placeholder="Search events" onChange={setEventId} />
+          </Field>
+        )}
 
         <AudienceField audience={audience} onAudience={setAudience} groupIds={groupIds} onGroupIds={setGroupIds} allGroups error={errorFor('Groups')} />
         {audience === 'everyone' && <GuestVisibilityField value={guestVisible} onChange={setGuestVisible} />}

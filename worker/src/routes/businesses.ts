@@ -3,7 +3,7 @@ import { audit } from '../lib/audit.ts';
 import { optionalWebLink } from '../lib/communityValidate.ts';
 import { badRequest, forbidden, jsonResponse, notFound, readJson, unauthorized } from '../lib/http.ts';
 import { newId } from '../lib/ids.ts';
-import { signValue, verifyValue } from '../lib/signedToken.ts';
+import { IMAGE_LINK_ALIGN_SECONDS, imageVersion, signValue, verifyValue } from '../lib/signedToken.ts';
 import { nowIso } from '../lib/time.ts';
 import { flag, optionalString, positiveInt, requiredString } from '../lib/validate.ts';
 import { isStaffRole, requireActiveCommunityMember, requireCommunityViewer } from '../middleware/auth.ts';
@@ -41,8 +41,8 @@ function staffModerator(auth: AuthContext): boolean {
 
 async function imageUrl(ctx: Ctx, kind: 'logo' | 'photo', id: string, key: unknown): Promise<string | null> {
   if (!key) return null;
-  const token = await signValue({ k: `business-${kind}`, i: id }, ctx.config.tokenSecret, IMAGE_TTL_SECONDS);
-  return `/api/community/files/business/${kind}/${id}?token=${encodeURIComponent(token)}`;
+  const token = await signValue({ k: `business-${kind}`, i: id }, ctx.config.tokenSecret, IMAGE_TTL_SECONDS, IMAGE_LINK_ALIGN_SECONDS);
+  return `/api/community/files/business/${kind}/${id}?token=${encodeURIComponent(token)}&v=${imageVersion(key)}`;
 }
 
 async function businessOut(ctx: Ctx, row: Record<string, unknown>, auth: AuthContext, withPhotos = false) {
